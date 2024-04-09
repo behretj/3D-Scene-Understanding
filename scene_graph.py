@@ -22,8 +22,11 @@ class SceneGraph:
         for obj in objects:
             self.add_node(obj)
 
-        # TODO: check whether the k-nearest neighbors are correct
-        centroids = np.array([node.centroid for node in self.nodes])
+        sorted_nodes = sorted(self.nodes, key=lambda node: node.object_id)
+
+        # Get centroids of sorted nodes
+        centroids = np.array([node.centroid for node in sorted_nodes])
+        # centroids = np.array([node.centroid for node in self.nodes])
         tree = cKDTree(centroids)
 
         for node in self.nodes:
