@@ -2,33 +2,6 @@ import open3d as o3d
 import numpy as np
 from scene_graph import SceneGraph
 
-def read_ply(file_path="point_lifted_mesh_ascii.ply", label_file='labels.txt'):
-    points = []
-    colors = []
-    with open(file_path, 'r') as f:
-        lines = f.readlines()
-        data_start = False
-        for line in lines:
-            if line.startswith('end_header'):
-                data_start = True
-                continue
-            if data_start:
-                parts = line.strip().split()
-                points.append([float(parts[0]), float(parts[1]), float(parts[2])])
-                colors.append([int(parts[3]), int(parts[4]), int(parts[5])])
-    with open(label_file, 'r') as f:
-        labels = [int(label.strip()) for label in f.readlines()]
-    return np.array(points), np.array(colors), np.array(labels)
-
-def calculate_mean_pointcloud(points, colors, labels):
-    unique_labels = np.unique(labels, axis=0)
-    centroids = []
-    for label in unique_labels:
-        indices = np.where(labels == label)
-        mean_point = np.mean(points[indices], axis=0)
-        color = np.array(colors[indices])
-        centroids.append((mean_point, color[0], label))
-    return centroids
 
 def visualize_scene_graph(scene_graph, point_cloud_path):
     # Load your original point cloud
@@ -70,8 +43,7 @@ if __name__ == "__main__":
     scene_graph = SceneGraph()
     file_path = 'point_lifted_mesh_ascii.ply'
     label_path = 'labels.txt'
-    points, colors, labels = read_ply(file_path)
-    node_objs = calculate_mean_pointcloud(points, colors, labels)
-    scene_graph.build_scene_graph(node_objs, k=3)
-    visualize_scene_graph(scene_graph, file_path)
+    scene_graph.build(file_path, label_path, k=2)
+    # visualize_scene_graph(scene_graph, file_path)
+    scene_graph.visualize(centroids=True, connections=True, scale=1.0, exlcude=[0, 1])
 
