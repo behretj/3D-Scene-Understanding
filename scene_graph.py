@@ -22,21 +22,11 @@ class SceneGraph:
         self.index += 1
     
     def read_ply(self, file_path="point_lifted_mesh_ascii.ply", label_file='labels.txt'):
-        points, colors = [], []
-        with open(file_path, 'r') as f:
-            lines = f.readlines()
-            data_start = False
-            for line in lines:
-                if line.startswith('end_header'):
-                    data_start = True
-                    continue
-                if data_start:
-                    parts = line.strip().split()
-                    points.append([float(parts[0]), float(parts[1]), float(parts[2])])
-                    colors.append([int(parts[3]), int(parts[4]), int(parts[5])])
+        # TODO: check whether this works
+        pcd = o3d.io.read_point_cloud(file_path)
         with open(label_file, 'r') as f:
             labels = [int(label.strip()) for label in f.readlines()]
-        return np.array(points), np.array(colors), np.array(labels)
+        return np.array(pcd.points), np.array(pcd.colors), np.array(labels)
 
     def build(self, file_path="point_lifted_mesh_ascii.ply", label_file='labels.txt', k=2):
         points, colors, labels = self.read_ply(file_path, label_file)
@@ -61,15 +51,18 @@ class SceneGraph:
                 neighbor = self.nodes[idx]
                 node.neighbors.append(neighbor)
     
-    def visualize(self, centroids=True, connections=True, scale=0.0, exlcude=[]):
-        nodes = [node for node in self.nodes if node.object_id not in exlcude]
+    def visualize(self, centroids=True, connections=True, scale=0.0, exlcude=[], threshold=0):
+        if threshold:
+            nodes = [node for node in self.nodes if (node.object_id not in exlcude) and (node.points.shape[0] < threshold )]
+        else:
+            nodes = [node for node in self.nodes if node.object_id not in exlcude]
             
         geometries = []
         for node in nodes:
             pcd = o3d.geometry.PointCloud()
             pcd_points = node.points + scale*node.centroid
             pcd.points = o3d.utility.Vector3dVector(pcd_points)
-            pcd_color = np.array(node.color, dtype=np.float64) / 255.0
+            pcd_color = np.array(node.color, dtype=np.float64)
             pcd.paint_uniform_color(pcd_color)
             geometries.append(pcd)
         

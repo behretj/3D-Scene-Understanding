@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import open3d as o3d
+import os, json, glob
 from projectaria_tools.core.mps.utils import get_nearest_pose
 import projectaria_tools.core.mps as mps
 from projectaria_tools.core import data_provider, image, calibration
@@ -9,12 +10,13 @@ from projectaria_tools.core.sensor_data import TimeDomain, TimeQueryOptions
 from projectaria_tools.core.stream_id import RecordableTypeId, StreamId
 
 
-def pose_aria_pointcloud(vrsfile, image_index, marker_type=cv2.aruco.DICT_APRILTAG_36h11, save_aria_pcd=True, vis_detection=False, vis_poses=False):
-    ### user-defined (vrs_file: data, image_index: image with the aruco marker)
-    # vrsfile = "/home/tjark/Documents/aria_data/semantic-corner-1/f5ba674d-50f4-42ce-9adc-675e39fd5ef0.vrs"
-    # image_index = 15
+def pose_aria_pointcloud(scan_dir, image_index, marker_type=cv2.aruco.DICT_APRILTAG_36h11, aruco_length=0.147, save_aria_pcd=True, vis_detection=False, vis_poses=False):
+    vrs_files = glob.glob(os.path.join(scan_dir, '*.vrs'))
+    assert vrs_files is not None, "No vrs files found in directory"
+    vrs_file = vrs_files[0]
+    filename = os.path.splitext(os.path.basename(vrs_file))[0]
 
-    provider = data_provider.create_vrs_data_provider(vrsfile)
+    provider = data_provider.create_vrs_data_provider(vrs_file)
     assert provider is not None, "Cannot open file"
 
     camera_label = "camera-rgb"
@@ -44,7 +46,7 @@ def pose_aria_pointcloud(vrsfile, image_index, marker_type=cv2.aruco.DICT_APRILT
     corners, ids, _ = cv2.aruco.detectMarkers(aruco_image, arucoDict, parameters=arucoParams)
 
     if len(corners) > 0:
-        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, 0.147, cam_matrix, 0)
+        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, aruco_length, cam_matrix, 0)
         rotation_3x3, _ = cv2.Rodrigues(rvecs)
         T_camera_marker = np.eye(4)
         T_camera_marker[:3, :3] = rotation_3x3
@@ -61,7 +63,7 @@ def pose_aria_pointcloud(vrsfile, image_index, marker_type=cv2.aruco.DICT_APRILT
             cv2.waitKey(0)
 
         # Point cloud creation
-        global_points_path = "/home/tjark/Documents/aria_data/semantic-corner-1/mps_f5ba674d-50f4-42ce-9adc-675e39fd5ef0_vrs/slam/semidense_points.csv.gz"
+        global_points_path = scan_dir + "/mps_" + filename + "_vrs/slam/semidense_points.csv.gz"
         points = mps.read_global_point_cloud(global_points_path)
 
         # filter the point cloud using thresholds on the  inverse depth and distance standard deviation, user set
@@ -78,7 +80,7 @@ def pose_aria_pointcloud(vrsfile, image_index, marker_type=cv2.aruco.DICT_APRILT
         pcd.paint_uniform_color(np.random.rand(3))
 
 
-        closed_loop_path = "/home/tjark/Documents/aria_data/semantic-corner-1/mps_f5ba674d-50f4-42ce-9adc-675e39fd5ef0_vrs/slam/closed_loop_trajectory.csv"
+        closed_loop_path = scan_dir + "/mps_" + filename + "_vrs/slam/closed_loop_trajectory.csv"
         closed_loop_traj = mps.read_closed_loop_trajectory(closed_loop_path)
 
         t_first = provider.get_first_time_ns(stream_id, TimeDomain.DEVICE_TIME)
@@ -87,12 +89,13 @@ def pose_aria_pointcloud(vrsfile, image_index, marker_type=cv2.aruco.DICT_APRILT
         query_timestamp = start_trajectory + difference_to_start
         
         pose_info = get_nearest_pose(closed_loop_traj, query_timestamp)
-        assert pose_info
+        assert pose_info, "could not find pose for timestamp"
         T_world_device = pose_info.transform_world_device
         T_device_camera = calib.get_transform_device_camera()
         T_world_camera = T_world_device @ T_device_camera
         T_world_camera = T_world_camera.to_matrix()
-
+        
+        # TODO: is the rotation correct?
         rot_z_270 = np.array([[np.cos(3 * np.pi / 2), -np.sin(3 * np.pi / 2), 0, 0],
                             [np.sin(3 * np.pi / 2), np.cos(3 * np.pi / 2), 0, 0],
                             [0, 0, 1, 0],
@@ -133,30 +136,23 @@ def pose_aria_pointcloud(vrsfile, image_index, marker_type=cv2.aruco.DICT_APRILT
         return T_world_marker
 
 
-def pose_ipad_pointcloud(image_index, marker_type=cv2.aruco.DICT_APRILTAG_36h11, vis_detection=False, vis_poses=False):
-    image = cv2.imread("/home/tjark/Documents/aria_data/2024_04_15_17_23_57/frame_00030.jpg")
+def pose_ipad_pointcloud(scan_dir, image_index, pcd_path, marker_type=cv2.aruco.DICT_APRILTAG_36h11, aruco_length=0.147, vis_detection=False, vis_poses=False):
+    image = cv2.imread(scan_dir + f"/frame_{image_index:05}.jpg")
 
-    # image is frame0030.jpg
-    cam_matrix = np.array([[1597.8880615234375, 0, 946.49566650390625],
-                            [0, 1597.8880615234375, 711.8023681640625],
-                            [0, 0, 1]])
+    with open(scan_dir + f"/frame_{image_index:05}.json", 'r') as f:
+        camera_info = json.load(f)
+
+    cam_matrix = np.array(camera_info["intrinsics"]).reshape(3, 3)
     
     arucoDict = cv2.aruco.getPredefinedDictionary(marker_type)
     arucoParams = cv2.aruco.DetectorParameters()
-
-    # TODO: replace with actual json file
-    camera_info = {
-            "projectionMatrix": [1.6644667387008667, 0, 0.013546168804168701, 0, 0, 2.2192890644073486, -0.010691165924072266, 0, 0, 0, -0.9999997615814209, -0.00099999981466680765, 0, 0, -1, 0],
-            "intrinsics": [1597.8880615234375, 0, 946.49566650390625, 0, 1597.8880615234375, 711.8023681640625, 0, 0, 1],
-            "cameraPoseARFrame": [0.0031753906514495611, 0.9853176474571228, 0.1707017719745636, 2.1585512161254883, -0.69526088237762451, -0.12051788717508316, 0.70858144760131836, 0.034648377448320389, 0.71875041723251343, -0.12093230336904526, 0.684670090675354, -0.024456746876239777, 0, 0, 0, 0.99999994039535522]
-        }
 
 
     corners, ids, _ = cv2.aruco.detectMarkers(image, arucoDict, parameters=arucoParams)
 
     if len(corners) > 0:
         # TODO: check distortion coefficients of iPad
-        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, 0.15, cam_matrix, 0)
+        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, aruco_length, cam_matrix, 0)
         rotation_3x3, _ = cv2.Rodrigues(rvecs)
         T_camera_marker = np.eye(4)
         T_camera_marker[:3, :3] = rotation_3x3
@@ -169,7 +165,7 @@ def pose_ipad_pointcloud(image_index, marker_type=cv2.aruco.DICT_APRILTAG_36h11,
             scale = 0.4
             dim = (int(image.shape[1] * scale), int(image.shape[0] * scale))
             resized = cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
-            cv2.imshow("aruco", resized)
+            cv2.imshow("ipad", resized)
             cv2.waitKey(0)
         
         T_world_camera = np.array(camera_info["cameraPoseARFrame"]).reshape(4, 4)
@@ -184,7 +180,7 @@ def pose_ipad_pointcloud(image_index, marker_type=cv2.aruco.DICT_APRILTAG_36h11,
         T_world_marker = np.dot(T_world_camera, T_camera_marker)
 
         if vis_poses:
-            pcd = o3d.io.read_point_cloud("/home/tjark/Documents/aria_data/tjark_scene_01_17_31_28.ply")
+            pcd = o3d.io.read_point_cloud(pcd_path)
 
             mesh_frame_world = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4, origin=[0, 0, 0])
             
@@ -210,6 +206,7 @@ def pose_ipad_pointcloud(image_index, marker_type=cv2.aruco.DICT_APRILTAG_36h11,
             o3d.visualization.draw_geometries([pcd, mesh_frame_world, mesh_frame_camera, mesh_frame_marker, sphere_camera, sphere_marker])
         
         return T_world_marker
+
 
 def transform_ipad_to_aria_pointcloud(pointcloud_path, T_world_marker_ipad, T_world_marker_aria):
     pcd = o3d.io.read_point_cloud(pointcloud_path)
