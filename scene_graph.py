@@ -16,6 +16,7 @@ class SceneGraph:
     def __init__(self):
         self.index = 0
         self.nodes = []
+        self.tree = None
 
     def add_node(self, centroid, color, sem_label, points):
         self.nodes.append(ObjectNode(self.index, centroid, color, sem_label, points))
@@ -43,13 +44,29 @@ class SceneGraph:
         # Get centroids of sorted nodes
         centroids = np.array([node.centroid for node in sorted_nodes])
         # centroids = np.array([node.centroid for node in self.nodes])
-        tree = cKDTree(centroids)
+        self.tree = cKDTree(centroids)
 
         for node in self.nodes:
-            _, indices = tree.query(node.centroid, k=k+1)
+            _, indices = self.tree.query(node.centroid, k=k+1)
             for idx in indices[1:]:
                 neighbor = self.nodes[idx]
                 node.neighbors.append(neighbor)
+    
+    def get_distance(self, point):
+        _, idx = self.tree.query(point)
+        node = self.nodes[idx]
+        return np.linalg.norm(point - node.centroid)
+    
+    def nearest_neighbor_bbox(self, points):
+        distances = np.array([self.get_distance(point) for point in points])
+        index = np.argmin(distances)
+        _, idx = self.tree.query(points[index])
+        node = self.nodes[idx]
+        bbox = o3d.geometry.AxisAlignedBoundingBox.create_from_points(o3d.utility.Vector3dVector(node.points))
+        bbox.color = [1,0,0]
+        return bbox
+
+
     
     def visualize(self, centroids=True, connections=True, scale=0.0, exlcude=[], threshold=0):
         if threshold:

@@ -6,40 +6,6 @@ from projectaria_tools.core.mps.utils import get_nearest_pose
 import projectaria_tools.core.mps as mps
 from projectaria_tools.core import data_provider, image, calibration
 from projectaria_tools.core.mps.utils import filter_points_from_confidence
-from projectaria_tools.core.sensor_data import TimeDomain, TimeQueryOptions
-from projectaria_tools.core.stream_id import RecordableTypeId, StreamId
-
-
-
-def get_all_images(scan_dir):
-    vrs_files = glob.glob(os.path.join(scan_dir, '*.vrs'))
-    assert vrs_files is not None, "No vrs files found in directory"
-    vrs_file = vrs_files[0]
-
-    provider = data_provider.create_vrs_data_provider(vrs_file)
-    assert provider is not None, "Cannot open file"
-
-    deliver_option = provider.get_default_deliver_queued_options()
-
-    # Only play data from two cameras, also reduce framerate to half of vrs
-    deliver_option.deactivate_stream_all()
-    camera_label = "camera-rgb"
-    stream_id = provider.get_stream_id_from_label(camera_label)
-    calib = provider.get_device_calibration().get_camera_calib(camera_label)
-    w, h = calib.get_image_size()
-    pinhole = calibration.get_linear_camera_calibration(w, h, calib.get_focal_lengths()[0])
-
-    image_dir = os.path.join(scan_dir, 'images')
-    os.makedirs(image_dir, exist_ok=True)
-
-    for i in range(provider.get_num_data(stream_id)):
-        image_data = provider.get_image_data_by_index(stream_id, i)
-        img = image_data[0].to_numpy_array()
-        undistorted_image = calibration.distort_by_calibration(img, pinhole, calib)
-        aruco_image = cv2.cvtColor(undistorted_image, cv2.COLOR_RGB2BGR)
-        aruco_image = cv2.rotate(aruco_image, cv2.ROTATE_90_CLOCKWISE)
-        cv2.imwrite(os.path.join(image_dir, f"frame_{i:05}.jpg"), aruco_image)
-
 
 # THIS IS THE WORKING VERSION FOR THE FIRST ARIA SCAN
 def pose_aria_pointcloud(scan_dir, marker_type=cv2.aruco.DICT_APRILTAG_36h11, aruco_length=0.148, save_aria_pcd=True, vis_detection=False, vis_poses=False):
@@ -98,8 +64,6 @@ def pose_aria_pointcloud(scan_dir, marker_type=cv2.aruco.DICT_APRILTAG_36h11, ar
         raw_image = image_data[0].to_numpy_array()
         undistorted_image = calibration.distort_by_calibration(raw_image, pinhole, calib)
         aruco_image = cv2.cvtColor(undistorted_image, cv2.COLOR_RGB2BGR)
-        # TODO: horiontal or vertical photo?
-        # TODO (important): I need to use the pinholecw90 thing, to also rotate the camera matrix etc.
         aruco_image = cv2.rotate(aruco_image, cv2.ROTATE_90_CLOCKWISE)
         
         corners, ids, _ = cv2.aruco.detectMarkers(aruco_image, arucoDict, parameters=arucoParams)
@@ -163,8 +127,8 @@ def pose_aria_pointcloud(scan_dir, marker_type=cv2.aruco.DICT_APRILTAG_36h11, ar
                 o3d.visualization.draw_geometries([pcd, mesh_frame_world, mesh_frame_camera, mesh_frame_marker, sphere_camera, sphere_marker])
             
             if save_aria_pcd:
-                # TODO: save this to correct location and name
-                o3d.io.write_point_cloud("aria_pointcloud.ply", pcd)
+                pcd_path = os.path.join(scan_dir, "aria_pointcloud.ply")
+                o3d.io.write_point_cloud(pcd_path, pcd)
 
             return T_world_marker
     
@@ -177,8 +141,8 @@ def pose_ipad_pointcloud(scan_dir, pcd_path=None, marker_type=cv2.aruco.DICT_APR
 
     for image_name in image_files:
         image = cv2.imread(image_name)
-        # TODO: horiontal or vertical photo?
-        image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+        ### For the first iPad scan, the image needs to be rotated 90 degree        
+        # image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
 
         with open(image_name[:-4] + ".json", 'r') as f:
             camera_info = json.load(f)
@@ -218,7 +182,18 @@ def pose_ipad_pointcloud(scan_dir, pcd_path=None, marker_type=cv2.aruco.DICT_APR
                             [0, 0, -1, 0],
                             [0, 0, 0, 1]])
             
-            T_world_camera = np.dot(T_world_camera, rot_y_180)
+            rot_x_180 = np.array([[1, 0, 0, 0],
+                      [0, -1, 0, 0],
+                      [0, 0, -1, 0],
+                      [0, 0, 0, 1]])
+            
+            
+            ### For the first iPad scan, the camera needs to be rotated 180 degree
+            ### around y instead of x axis (and the rotation of the image in the beginning)
+            # T_world_camera = np.dot(T_world_camera, rot_y_180)
+            
+            ### For the second iPad scan:
+            T_world_camera = np.dot(T_world_camera, rot_x_180)
 
             T_world_marker = np.dot(T_world_camera, T_camera_marker)
 
