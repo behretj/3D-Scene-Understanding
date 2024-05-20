@@ -135,6 +135,26 @@ def pose_aria_pointcloud(scan_dir, marker_type=cv2.aruco.DICT_APRILTAG_36h11, ar
     raise ValueError("No marker found for pose estimation")
 
 
+def convert_z_up_to_y_up(pcd_path):
+    # Define the inverse tranformation I did to get pcd from y-up to z-up
+    rot_z_90 = np.array([[np.cos(np.pi/2), -np.sin(np.pi/2), 0, 0],
+                        [np.sin(np.pi/2), np.cos(np.pi/2), 0, 0],
+                        [0, 0, 1, 0],
+                        [0, 0, 0, 1]])
+
+    rot_x_minus_90 = np.array([[1, 0, 0, 0],
+                            [0, np.cos(-np.pi/2), -np.sin(-np.pi/2), 0],
+                            [0, np.sin(-np.pi/2), np.cos(-np.pi/2), 0],
+                            [0, 0, 0, 1]])
+    
+
+    inverse = np.dot(rot_x_minus_90, rot_z_90)
+
+    pcd = o3d.io.read_point_cloud(pcd_path)
+    pcd.transform(inverse)
+
+    o3d.io.write_point_cloud(pcd_path[:-4] + "_y_up.ply", pcd)
+
 def pose_ipad_pointcloud(scan_dir, pcd_path=None, marker_type=cv2.aruco.DICT_APRILTAG_36h11, aruco_length=0.148, vis_detection=False):
     """ Finds the first aruco marker in the given iPad scan and returns the pose of the marker in the world frame."""
     image_files = sorted(glob.glob(os.path.join(scan_dir, 'frame_*.jpg')))
@@ -157,7 +177,6 @@ def pose_ipad_pointcloud(scan_dir, pcd_path=None, marker_type=cv2.aruco.DICT_APR
         corners, ids, _ = cv2.aruco.detectMarkers(image, arucoDict, parameters=arucoParams)
 
         if len(corners) > 0:
-            # TODO: check distortion coefficients of iPad
             rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, aruco_length, cam_matrix, 0)
             rotation_3x3, _ = cv2.Rodrigues(rvecs)
             T_camera_marker = np.eye(4)
@@ -177,11 +196,6 @@ def pose_ipad_pointcloud(scan_dir, pcd_path=None, marker_type=cv2.aruco.DICT_APR
             
             T_world_camera = np.array(camera_info["cameraPoseARFrame"]).reshape(4, 4)
             
-            rot_y_180 = np.array([[-1, 0, 0, 0],
-                            [0, 1, 0, 0],
-                            [0, 0, -1, 0],
-                            [0, 0, 0, 1]])
-            
             rot_x_180 = np.array([[1, 0, 0, 0],
                       [0, -1, 0, 0],
                       [0, 0, -1, 0],
@@ -198,7 +212,22 @@ def pose_ipad_pointcloud(scan_dir, pcd_path=None, marker_type=cv2.aruco.DICT_APR
             T_world_marker = np.dot(T_world_camera, T_camera_marker)
 
             if pcd_path is not None:
+                # # Define the inverse tranformation I did to get pcd from y-up to z-up
+                # rot_z_90 = np.array([[np.cos(np.pi/2), -np.sin(np.pi/2), 0, 0],
+                #                     [np.sin(np.pi/2), np.cos(np.pi/2), 0, 0],
+                #                     [0, 0, 1, 0],
+                #                     [0, 0, 0, 1]])
+
+                # rot_x_minus_90 = np.array([[1, 0, 0, 0],
+                #                         [0, np.cos(-np.pi/2), -np.sin(-np.pi/2), 0],
+                #                         [0, np.sin(-np.pi/2), np.cos(-np.pi/2), 0],
+                #                         [0, 0, 0, 1]])
+                
+
+                # inverse = np.dot(rot_x_minus_90, rot_z_90)
+
                 pcd = o3d.io.read_point_cloud(pcd_path)
+                # pcd.transform(inverse)
 
                 mesh_frame_world = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4, origin=[0, 0, 0])
                 

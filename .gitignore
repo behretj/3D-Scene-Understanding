@@ -1,2 +1,5 @@
 __pycache__
 SemanticCorner*
+.ipynb_checkpoints
+Old_data
+SceneGraph*

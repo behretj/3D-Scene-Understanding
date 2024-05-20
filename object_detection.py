@@ -19,28 +19,27 @@ def get_all_aria_hand_poses(scan_dir, mode_left_right=False):
     wrist_and_palm_poses_path = scan_dir + "/mps_" + filename + "_vrs/hand_tracking/wrist_and_palm_poses.csv"
     wrist_and_palm_poses = mps.hand_tracking.read_wrist_and_palm_poses(wrist_and_palm_poses_path)
 
-    hand_poses_left, hand_poses_right = [], []
+    hand_poses_left, hand_poses_right, T_poses = [], [], []
     both_count, i = 0, 0
     for hand_pose in wrist_and_palm_poses:
         query_timestamp = hand_pose.tracking_timestamp.total_seconds()*1e9
         device_pose = get_nearest_pose(closed_loop_traj, query_timestamp)
         if device_pose:
-            i += 1
-            if hand_pose.left_hand.confidence > 0.5 and hand_pose.right_hand.confidence > 0.5:
-                both_count += 1
             T_world_device = device_pose.transform_world_device.to_matrix()
-            if hand_pose.left_hand.confidence > 0.5:
+            if hand_pose.left_hand.confidence > 0.0:
                 left_palm_position_device = hand_pose.left_hand.palm_position_device
                 left_palm_position_world = np.dot(T_world_device, np.append(left_palm_position_device, 1))[:3]
                 hand_poses_left.append(left_palm_position_world)
-            if hand_pose.right_hand.confidence > 0.5:
+                T_poses.append(T_world_device)
+            if hand_pose.right_hand.confidence > 0.0:
                 right_palm_position_device = hand_pose.right_hand.palm_position_device
                 right_palm_position_world = np.dot(T_world_device, np.append(right_palm_position_device, 1))[:3]
                 hand_poses_right.append(right_palm_position_world) if mode_left_right else hand_poses_left.append(right_palm_position_world)
+                T_poses.append(T_world_device)
     
-    return (hand_poses_left, hand_poses_right) if mode_left_right else hand_poses_left
+    return (np.array(hand_poses_left), np.array(hand_poses_right), T_poses) if mode_left_right else (np.array(hand_poses_left), T_poses)
 
-def get_hand_object_interactions(scan_dir):
+def get_hand_object_interactions(scan_dir, mode_left_right=False):
     """ Returns nearest Aria MPS poses, separated for left and right hand, for all the interactions between
         hand and object. Hand-object interactions are filtered and in the end only the interactions are
         returned where the hand is in contact with the object, the object is movable, the hand and object
@@ -72,7 +71,7 @@ def get_hand_object_interactions(scan_dir):
     closed_loop_path = scan_dir + "/mps_" + filename + "_vrs/slam/closed_loop_trajectory.csv"
     closed_loop_traj = mps.read_closed_loop_trajectory(closed_loop_path)
 
-    hand_poses_left, hand_poses_right = [], []
+    hand_poses_left, hand_poses_right, T_world_devices = [], [], []
     
     for index in range(0, provider.get_num_data(stream_id)):
         name_curr = f"frame_{index:05}.jpg"
@@ -122,21 +121,23 @@ def get_hand_object_interactions(scan_dir):
             if wrist_and_palm_pose is None:
                 continue
 
+            found_object = False
+
             if wrist_and_palm_pose.left_hand.confidence > 0.5 and abs(wrist_and_palm_pose.tracking_timestamp.total_seconds()*1e9 - query_timestamp) < 1e8:
                 left_palm_position_device = wrist_and_palm_pose.left_hand.palm_position_device
                 left_palm_position_world = np.dot(T_world_device, np.append(left_palm_position_device, 1))[:3]
-                print("Left hand pose found")
-                print(wrist_and_palm_pose)
                 hand_poses_left.append(left_palm_position_world)
+                T_world_devices.append(T_world_device)
+                found_object = True
             
             if wrist_and_palm_pose.right_hand.confidence > 0.5 and abs(wrist_and_palm_pose.tracking_timestamp.total_seconds()*1e9 - query_timestamp) < 1e8:
                 right_palm_position_device = wrist_and_palm_pose.right_hand.palm_position_device
                 right_palm_position_world = np.dot(T_world_device, np.append(right_palm_position_device, 1))[:3]
-                print("Right hand pose found")
-                print(wrist_and_palm_pose)
-                hand_poses_right.append(right_palm_position_world)
+                hand_poses_right.append(right_palm_position_world) if mode_left_right else hand_poses_left.append(right_palm_position_world)
+                if not found_object:
+                    T_world_devices.append(T_world_device)
 
-    return hand_poses_left, hand_poses_right
+    return (np.array(hand_poses_left), np.array(hand_poses_right), np.array(T_world_devices)) if mode_left_right else (np.array(hand_poses_left), np.array(T_world_devices))
 
 
 def get_all_object_detections(scan_dir):

@@ -6,42 +6,81 @@ from projectaria_tools.core import data_provider, calibration
 def get_all_images(scan_dir):
     vrs_files = glob.glob(os.path.join(scan_dir, '*.vrs'))
     assert vrs_files is not None, "No vrs files found in directory"
-    vrs_file = vrs_files[0]
+    for vrs_file in vrs_files:
+        provider = data_provider.create_vrs_data_provider(vrs_file)
+        assert provider is not None, "Cannot open file"
 
-    provider = data_provider.create_vrs_data_provider(vrs_file)
-    assert provider is not None, "Cannot open file"
+        deliver_option = provider.get_default_deliver_queued_options()
 
-    deliver_option = provider.get_default_deliver_queued_options()
+        deliver_option.deactivate_stream_all()
+        camera_label = "camera-rgb"
+        stream_id = provider.get_stream_id_from_label(camera_label)
+        calib = provider.get_device_calibration().get_camera_calib(camera_label)
+        w, h = calib.get_image_size()
+        pinhole = calibration.get_linear_camera_calibration(w, h, calib.get_focal_lengths()[0])
 
-    deliver_option.deactivate_stream_all()
-    camera_label = "camera-rgb"
-    stream_id = provider.get_stream_id_from_label(camera_label)
-    calib = provider.get_device_calibration().get_camera_calib(camera_label)
-    w, h = calib.get_image_size()
-    pinhole = calibration.get_linear_camera_calibration(w, h, calib.get_focal_lengths()[0])
+        image_dir = os.path.join(scan_dir, vrs_file[:-4] + "_images")
+        os.makedirs(image_dir, exist_ok=True)
 
-    image_dir = os.path.join(scan_dir, 'images')
-    os.makedirs(image_dir, exist_ok=True)
+        for i in range(provider.get_num_data(stream_id)):
+            image_data = provider.get_image_data_by_index(stream_id, i)
+            img = image_data[0].to_numpy_array()
+            undistorted_image = calibration.distort_by_calibration(img, pinhole, calib)
+            aruco_image = cv2.cvtColor(undistorted_image, cv2.COLOR_RGB2BGR)
+            aruco_image = cv2.rotate(aruco_image, cv2.ROTATE_90_CLOCKWISE)
+            cv2.imwrite(os.path.join(image_dir, f"frame_{i:05}.jpg"), aruco_image)
 
-    for i in range(provider.get_num_data(stream_id)):
-        image_data = provider.get_image_data_by_index(stream_id, i)
-        img = image_data[0].to_numpy_array()
-        undistorted_image = calibration.distort_by_calibration(img, pinhole, calib)
-        aruco_image = cv2.cvtColor(undistorted_image, cv2.COLOR_RGB2BGR)
-        aruco_image = cv2.rotate(aruco_image, cv2.ROTATE_90_CLOCKWISE)
-        cv2.imwrite(os.path.join(image_dir, f"frame_{i:05}.jpg"), aruco_image)
 
+def mask3d_labels(label_path):
+    with open(label_path, 'r') as file:
+        lines = file.readlines()
+    
+    file_paths = []
+    values = []
+    confidences = []
+
+    for line in lines:
+        parts = line.split()
+        file_paths.append(parts[0])
+        values.append(int(parts[1]))
+        confidences.append(float(parts[2]))
+    
+    base_dir = os.path.dirname(os.path.abspath(label_path))
+    first_pred_mask_path = os.path.join(base_dir, file_paths[0])
+
+    with open(first_pred_mask_path, 'r') as file:
+        num_lines = len(file.readlines())
+
+    mask3d_labels = np.zeros(num_lines, dtype=int)
+
+    for i, relative_path in enumerate(file_paths):
+        value = values[i]
+        file_path = os.path.join(base_dir, relative_path)
+        with open(file_path, 'r') as file:
+            for j, line in enumerate(file):
+                if line.strip() == '1':
+                    mask3d_labels[j] = value
+
+    output_path = os.path.join(base_dir, 'mask3d_labels.txt')
+    with open(output_path, 'w') as file:
+        for label in mask3d_labels:
+            file.write(f"{label}\n")
+
+    
 
 def vis_detections(coords, color=[0,0,1]):
     spheres = []
+
+    if len(coords) == 0:
+        return spheres
     
-    # If coords is a 1D array (a single coordinate), convert it to a 2D array with one row
     if len(coords.shape) == 1:
         coords = np.array([coords])
     
     for coord in coords:
         sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.02)
         sphere.paint_uniform_color(color)
+        sphere.compute_vertex_normals()
         sphere.translate(coord)
         spheres += [sphere]
     return spheres
