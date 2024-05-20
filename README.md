@@ -1,4 +1,4 @@
-# GitHub for Semester Project - Growing Scene Graphs from observations
+# Semester Project - Growing Scene Graphs from observations
 
 # SceneGraph-Dataset Directory Structure
 
