@@ -3,7 +3,7 @@
 # SceneGraph-Dataset Directory Structure
 
 The `SceneGraph-Dataset` directory contains various subdirectories categorized by difficulty levels and specific scene graph configurations. Below is an overview of the directory structure:
-'''bash
+```bash
 SceneGraph-Dataset/
 ├── iPad-Scan-1/  # semantic segmentation
 ├── iPad-Scan-2/
@@ -61,4 +61,4 @@ SceneGraph-Dataset/
 ├── Difficult_Pillow_OOF/
 ├── Difficult_Plant_OOF/
 └── Difficult_WateringPot_OOF/
-'''
+```
