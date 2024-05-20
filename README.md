@@ -5,17 +5,27 @@
 The `SceneGraph-Dataset` directory contains various subdirectories categorized by difficulty levels and specific scene graph configurations. Below is an overview of the directory structure:
 
 SceneGraph-Dataset/
-├── iPad-Scan-1/  # semantic segmentation \n
-├── iPad-Scan-2/ \n
-├── Easy_Ball_Both_Hands/ \n
-├── Easy_Ball_Left_Hand/ \n
-├── Easy_Ball_Right_Hand/ \n
-├── Easy_Frame_Both_Hands/ \n
-├── Easy_Frame_Left_Hand/ \n
-├── Easy_Frame_Right_Hand/ \n
-├── Easy_Pillow_Both_Hands/ \n
-├── Easy_Pillow_Left_Hand/ \n
-├── Easy_Pillow_Right_Hand/ \n
+├── iPad-Scan-1/  # semantic segmentation
+
+├── iPad-Scan-2/
+
+├── Easy_Ball_Both_Hands/
+
+├── Easy_Ball_Left_Hand/
+
+├── Easy_Ball_Right_Hand/
+
+├── Easy_Frame_Both_Hands/
+
+├── Easy_Frame_Left_Hand/
+
+├── Easy_Frame_Right_Hand/
+
+├── Easy_Pillow_Both_Hands/
+
+├── Easy_Pillow_Left_Hand/
+
+├── Easy_Pillow_Right_Hand/
 ├── Easy_Plant_Both_Hands/ \n
 ├── Easy_Plant_Left_Hand/ \n
 ├── Easy_Plant_Right_Hand/ \n
