@@ -2,6 +2,9 @@ import open3d as o3d
 import glob, os, cv2
 import numpy as np
 from projectaria_tools.core import data_provider, calibration
+import imageio
+from moviepy.editor import VideoFileClip, clips_array
+import json
 
 def get_all_images(scan_dir):
     vrs_files = glob.glob(os.path.join(scan_dir, '*.vrs'))
@@ -69,6 +72,7 @@ def mask3d_labels(label_path):
     
 
 def vis_detections(coords, color=[0,0,1]):
+    coords = np.asarray(coords)
     spheres = []
 
     if len(coords) == 0:
@@ -109,3 +113,48 @@ def filter_object(obj_dets, hand_dets):
             img_obj_id.append(dist_min)
         
     return img_obj_id
+
+
+def create_video(image_dir, output_path="output.mp4", fps=30):
+    images = []
+    for filename in sorted(glob.glob(os.path.join(image_dir, '*.jpg'))):
+        images.append(filename)
+    
+    
+    with imageio.get_writer(output_path, fps=fps) as writer:
+        for i, image_file in enumerate(images):
+            # Read each image
+            image = imageio.imread(image_file)
+            # Append the image to the video
+            writer.append_data(image)
+
+def save_camera_params(scene, path):
+    # Save the current camera parameters to a file
+    camera_params = scene.get_view_control().convert_to_pinhole_camera_parameters()
+    with open(path, "w") as f:
+        json.dump(camera_params.__dict__, f, default=lambda o: o.__dict__)
+
+def load_camera_params(scene, path):
+    # Load the camera parameters from a file
+    with open(path, "r") as f:
+        camera_params_dict = json.load(f)
+    camera_params = o3d.camera.PinholeCameraParameters()
+    camera_params.__dict__.update(camera_params_dict)
+    scene.get_view_control().convert_from_pinhole_camera_parameters(camera_params)
+
+def capture_image(scene_widget, file_path):
+    image = scene_widget.scene.renderer.render_to_image()
+    o3d.io.write_image(file_path, image)
+
+def stitch_videos(video_path_1, video_path_2, new_file="combined_video.mp4"):
+    video1 = VideoFileClip(video_path_1)
+    video2 = VideoFileClip(video_path_2)
+
+    # Ensure both videos have the same duration, fps, and dimensions
+    # This should be already true according to your information
+
+    # Combine the videos side by side
+    final_video = clips_array([[video1, video2]])
+
+    # Save the final video
+    final_video.write_videofile(new_file)

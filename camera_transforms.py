@@ -7,9 +7,8 @@ import projectaria_tools.core.mps as mps
 from projectaria_tools.core import data_provider, image, calibration
 from projectaria_tools.core.mps.utils import filter_points_from_confidence
 
-# THIS IS THE WORKING VERSION FOR THE FIRST ARIA SCAN
 def pose_aria_pointcloud(scan_dir, marker_type=cv2.aruco.DICT_APRILTAG_36h11, aruco_length=0.148, save_aria_pcd=True, vis_detection=False, vis_poses=False):
-    """ Finds the first aruco marker in the given vrs file and returns the pose of the marker in the world frame"""
+    """ Finds the first aruco marker in the given vrs file of the scan directory and returns the pose of the marker in the world frame"""
     vrs_files = glob.glob(os.path.join(scan_dir, '*.vrs'))
     assert vrs_files is not None, "No vrs files found in directory"
     vrs_file = vrs_files[0]
@@ -75,6 +74,7 @@ def pose_aria_pointcloud(scan_dir, marker_type=cv2.aruco.DICT_APRILTAG_36h11, ar
             T_camera_marker[:3, :3] = rotation_3x3
             T_camera_marker[:3, 3] = tvecs
 
+            # for debugging: visualize the aruco detection
             if vis_detection:
                 cv2.aruco.drawDetectedMarkers(aruco_image, corners, ids)
                 cv2.drawFrameAxes(aruco_image, cam_matrix, 0, rvecs, tvecs, 0.1)
@@ -102,6 +102,7 @@ def pose_aria_pointcloud(scan_dir, marker_type=cv2.aruco.DICT_APRILTAG_36h11, ar
 
             T_world_marker = np.dot(T_world_camera, T_camera_marker)
 
+            # for debugging: visualize the poses
             if vis_poses:
                 mesh_frame_world = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4, origin=[0, 0, 0])
                 
@@ -132,11 +133,11 @@ def pose_aria_pointcloud(scan_dir, marker_type=cv2.aruco.DICT_APRILTAG_36h11, ar
 
             return T_world_marker
     
-    raise ValueError("No marker found for pose estimation")
+    print("No marker found for pose estimation")
 
 
 def convert_z_up_to_y_up(pcd_path):
-    # Define the inverse tranformation I did to get pcd from y-up to z-up
+    """ Converts a given pointcloud from z-up to y-up coordinate system."""
     rot_z_90 = np.array([[np.cos(np.pi/2), -np.sin(np.pi/2), 0, 0],
                         [np.sin(np.pi/2), np.cos(np.pi/2), 0, 0],
                         [0, 0, 1, 0],
@@ -183,8 +184,8 @@ def pose_ipad_pointcloud(scan_dir, pcd_path=None, marker_type=cv2.aruco.DICT_APR
             T_camera_marker[:3, :3] = rotation_3x3
             T_camera_marker[:3, 3] = tvecs
 
+            # for debugging: visualize the aruco detection
             if vis_detection:
-                # draw Marker border and axes
                 cv2.aruco.drawDetectedMarkers(image, corners, ids)
                 cv2.drawFrameAxes(image, cam_matrix, 0, rvecs, tvecs, 0.1)
                 scale = 0.4
@@ -254,7 +255,7 @@ def pose_ipad_pointcloud(scan_dir, pcd_path=None, marker_type=cv2.aruco.DICT_APR
             
             return T_world_marker
         
-    raise ValueError("No marker found for pose estimation")
+    print("No marker found for pose estimation")
 
 
 def transform_ipad_to_aria_pointcloud(pointcloud_path, T_world_marker_ipad, T_world_marker_aria):

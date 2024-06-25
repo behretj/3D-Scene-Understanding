@@ -54,10 +54,6 @@ def get_hand_object_interactions(scan_dir, mode_left_right=False):
 
     camera_label = "camera-rgb"
     stream_id = provider.get_stream_id_from_label(camera_label)
-    calib = provider.get_device_calibration().get_camera_calib(camera_label)
-    w, h = calib.get_image_size()
-
-    pinhole = calibration.get_linear_camera_calibration(w, h, calib.get_focal_lengths()[0])
 
     detection_files = glob.glob(os.path.join(scan_dir, '*.pickle'))
     assert detection_files is not None, "No detection files found in directory"
@@ -153,12 +149,9 @@ def get_all_object_detections(scan_dir):
     camera_label = "camera-rgb"
     stream_id = provider.get_stream_id_from_label(camera_label)
     calib = provider.get_device_calibration().get_camera_calib(camera_label)
-    fx, fy = calib.get_focal_lengths()[0], calib.get_focal_lengths()[1]
-    cx, cy = calib.get_principal_point()[0], calib.get_principal_point()[1]
     w, h = calib.get_image_size()
 
     pinhole = calibration.get_linear_camera_calibration(w, h, calib.get_focal_lengths()[0])
-    pinhole_cw90 = calibration.rotate_camera_calib_cw90deg(pinhole)
 
     detection_files = glob.glob(os.path.join(scan_dir, '*.pickle'))
     assert detection_files is not None, "No detection files found in directory"

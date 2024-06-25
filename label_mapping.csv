@@ -586,7 +586,6 @@ id,raw_category,category,count,nyuClass,nyu40class,nyu40id,eigen13class,eigen13i
 397,tank,tank,1,,otherprop,40,Objects,7.0,,122,tank,,,,,,,,,objects,39.0,,,,103-161-140,
 643,mail tray,mail tray,1,mail tray,otherprop,40,Objects,7.0,,137,tray,,,,,,,,,objects,39.0,,,,212-95-207,
 551,centerpiece,centerpiece,1,centerpiece,otherprop,40,Objects,7.0,,,,,,,,,,n02994419,centerpiece.n.02,objects,39.0,,,,117-184-88,
-1163,stick,stick,1,stick,otherprop,40,Objects,7.0,,,,,,,,,,,,objects,39.0,,,,98-141-208,
 1347,closet floor,closet floor,1,floor,floor,2,Floor,5.0,,3,floor,40,floor,,,,,n03365592,floor.n.01,floor,2.0,6.0,,,9-73-85,6.0
 1348,dryer sheets,dryer sheets,1,,otherprop,40,Objects,7.0,,,,,,,,,,,,objects,39.0,,,,214-30-132,
 803,bycicle,bycicle,1,,otherprop,40,Objects,7.0,,,,,,,,,,,,misc,40.0,,,,206-111-74,
