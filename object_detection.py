@@ -1,9 +1,10 @@
 import numpy as np
-import pickle, glob, os, cv2
+import pickle, glob, os
 from projectaria_tools.core import data_provider, calibration
 from projectaria_tools.core.mps.utils import get_nearest_wrist_and_palm_pose, get_nearest_pose
 import projectaria_tools.core.mps as mps
-from utils import calculate_center, filter_object
+
+### all functions here are not really needed anymore
 
 
 def get_all_aria_hand_poses(scan_dir, mode_left_right=False):

@@ -646,14 +646,14 @@ class SceneGraph:
                     if left_pos is not None:
                         lefty = o3d.geometry.TriangleMesh.create_sphere(radius=0.025)
                         lefty.translate(left_pos)
-                        if pose is None: lefty.paint_uniform_color([0.89803922, 0.22352941, 0.20784314])
+                        if left_id is None: lefty.paint_uniform_color([0.89803922, 0.22352941, 0.20784314])
                         else: lefty.paint_uniform_color([0.29803922, 0.68627451, 0.31372549])
                         lefty.compute_vertex_normals()
                         render.scene.add_geometry("left"+str(idx), lefty, material)
                     if right_pos is not None:
                         righty = o3d.geometry.TriangleMesh.create_sphere(radius=0.025)
                         righty.translate(right_pos)
-                        if pose is None: righty.paint_uniform_color([0.47058824, 0.36862745, 0.94117647])
+                        if right_id is None: righty.paint_uniform_color([0.47058824, 0.36862745, 0.94117647])
                         else: righty.paint_uniform_color([0.99607843, 0.38039216, 0])
                         righty.compute_vertex_normals()
                         render.scene.add_geometry("right"+str(idx), righty, material)
@@ -719,13 +719,21 @@ class SceneGraph:
         
         # add the geometries to the scene
         geometries = []
+
+        material = rendering.MaterialRecord()
+        material.shader = "defaultLit"
+
+        line_mat = rendering.MaterialRecord()
+        line_mat.shader = "unlitLine"
+        line_mat.line_width = 2
+
         for node in self.nodes:
             pcd = o3d.geometry.PointCloud()
             pcd_points = node.points + scale * node.centroid
             pcd.points = o3d.utility.Vector3dVector(pcd_points)
             pcd_color = np.array(node.color, dtype=np.float64)
             pcd.paint_uniform_color(pcd_color)
-            geometries.append((pcd, "node_" + str(node.object_id)))
+            geometries.append((pcd, "node_" + str(node.object_id), material))
 
         if centroids:
             centroid_pcd = o3d.geometry.PointCloud()
@@ -733,7 +741,7 @@ class SceneGraph:
             centroids_colors = np.array([node.color for node in self.nodes], dtype=np.float64) / 255.0
             centroid_pcd.points = o3d.utility.Vector3dVector(centroids_xyz)
             centroid_pcd.colors = o3d.utility.Vector3dVector(centroids_colors)
-            geometries.append((centroid_pcd, "centroids"))
+            geometries.append((centroid_pcd, "centroids", material))
 
         if connections:
             line_points = []
@@ -753,14 +761,14 @@ class SceneGraph:
                     lines=o3d.utility.Vector2iVector(line_indices)
                 )
                 line_set.paint_uniform_color([0, 0, 0])
-                geometries.append((line_set, "connections"))
+                geometries.append((line_set, "connections", line_mat))
 
         if optional_geometry and scale == 0.0:
             if isinstance(optional_geometry, list):
                 for i, geom in enumerate(optional_geometry):
-                    geometries.append((geom, f"optional_geometry_{i}"))
+                    geometries.append((geom, f"optional_geometry_{i}", material))
             else:
-                geometries.append((optional_geometry, "optional_geometry"))
+                geometries.append((optional_geometry, "optional_geometry", material))
 
         gui.Application.instance.initialize()
         window = gui.Application.instance.create_window("Press <S> to capture a screenshot or <ESC> to quit the application.", 1024, 1024)
@@ -769,15 +777,12 @@ class SceneGraph:
         scene.scene.set_background(np.array([255.0, 255.0, 255.0, 1.0], dtype=np.float32))
         window.add_child(scene)
 
-        material = rendering.MaterialRecord()
-        material.shader = "defaultLit"
-
-        for geometry, name in geometries:
-            scene.scene.add_geometry(name, geometry, material)
+        for geometry, name, mat in geometries:
+            scene.scene.add_geometry(name, geometry, mat)
 
         if geometries:
             bounds = geometries[0][0].get_axis_aligned_bounding_box()
-            for geometry, _ in geometries[1:]:
+            for geometry, _, _ in geometries[1:]:
                 bounds += geometry.get_axis_aligned_bounding_box()
             scene.setup_camera(60, bounds, bounds.get_center())
 

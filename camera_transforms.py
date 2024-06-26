@@ -4,7 +4,7 @@ import open3d as o3d
 import os, json, glob
 from projectaria_tools.core.mps.utils import get_nearest_pose
 import projectaria_tools.core.mps as mps
-from projectaria_tools.core import data_provider, image, calibration
+from projectaria_tools.core import data_provider, calibration
 from projectaria_tools.core.mps.utils import filter_points_from_confidence
 
 def pose_aria_pointcloud(scan_dir, marker_type=cv2.aruco.DICT_APRILTAG_36h11, aruco_length=0.148, save_aria_pcd=True, vis_detection=False, vis_poses=False):
@@ -267,4 +267,27 @@ def transform_ipad_to_aria_pointcloud(pointcloud_path, T_world_marker_ipad, T_wo
     pcd.transform(T_world_marker_aria)
     o3d.io.write_point_cloud(pointcloud_path[:-4] + "_transformed.ply", pcd)
     return pointcloud_path[:-4] + "_transformed.ply"
+
+
+def spot_to_aria_coords(points, aria_transform):
+    roty270 = np.array([
+        [np.cos(3*np.pi/2), 0, np.sin(3*np.pi/2), 0],
+        [0, 1, 0, 0],
+        [-np.sin(3*np.pi/2), 0, np.cos(3*np.pi/2), 0],
+        [0, 0, 0, 1]
+    ])
+
+    rotz90 = np.array([
+        [np.cos(np.pi/2), -np.sin(np.pi/2), 0, 0],
+        [np.sin(np.pi/2), np.cos(np.pi/2), 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1]
+    ])
+
+    points = np.dot(roty270, np.vstack((points.T, np.ones(points.shape[0])))).T[:, :3]
+    points = np.dot(rotz90, np.vstack((points.T, np.ones(points.shape[0])))).T[:, :3]
+    points = np.dot(aria_transform, np.vstack((points.T, np.ones(points.shape[0])))).T[:, :3]
+
+    return points
+
 
