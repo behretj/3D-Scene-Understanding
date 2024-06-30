@@ -1,13 +1,14 @@
 import numpy as np
+import open3d as o3d
 import pandas as pd
 from scene_graph import SceneGraph
-from camera_transforms import pose_aria_pointcloud, pose_ipad_pointcloud, transform_ipad_to_aria_pointcloud, spot_to_aria_coords
+from camera_transforms import pose_aria_pointcloud, pose_ipad_pointcloud, icp_alignment, transform_ipad_to_aria_pointcloud, spot_to_aria_coords
 from utils import vis_detections, get_all_images, mask3d_labels, create_video, stitch_videos
 
 if __name__ == "__main__":
 
     folder_names = [
-        "Easy_Ball_Both_Hands",
+        # "Easy_Ball_Both_Hands",
         # "Easy_Frame_Both_Hands",
         # "Easy_Frame_Left_Hand",
         # "Easy_Frame_Right_Hand",
@@ -45,13 +46,18 @@ if __name__ == "__main__":
         if T_aria is None or T_ipad is None:
             print("Skipping " + name)
             continue
-        transformed_pcd_filename = transform_ipad_to_aria_pointcloud("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/mesh_labelled_mask3d_dataset_1_y_up.ply", T_ipad, T_aria)
-        
-        
-        # scene_graph.build_mask3d("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/predictions_mask3d_1.txt", "/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/mesh_labelled_mask3d_dataset_1_y_up_transformed.ply")
-        scene_graph.build_mask3d("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/predictions_mask3d_1.txt", "/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/mesh_labelled_mask3d_dataset_1_y_up_transformed.ply")
 
-        #### Make the scene Graph more beautiful
+        T_ipad_inv = np.linalg.inv(T_ipad)
+        T_init = np.dot(T_aria, T_ipad_inv)
+        
+        icp_aligned_filename = icp_alignment("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/mesh_labelled_mask3d_dataset_1_y_up.ply", "/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/" + name + "/aria_pointcloud.ply", T_init=T_init)
+        # transformed_pcd_filename = transform_ipad_to_aria_pointcloud("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/mesh_labelled_mask3d_dataset_1_y_up.ply", T_ipad, T_aria)
+        
+        
+        scene_graph.build_mask3d("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/predictions_mask3d_1.txt", icp_aligned_filename)
+        # scene_graph.build_mask3d("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/predictions_mask3d_1.txt", "/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/mesh_labelled_mask3d_dataset_1_y_up_transformed.ply")
+
+        # #### Make the scene Graph more beautiful
         scene_graph.label_correction()
         scene_graph.remove_category("curtain")
         scene_graph.remove_category("cabinet")
@@ -61,28 +67,28 @@ if __name__ == "__main__":
         scene_graph.color_with_ibm_palette()
 
         # scene_graph.track_changes("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/" + name)
-        # scene_graph.tracking_video("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/" + name, "/home/tjark/Documents/growing_scene_graphs/tracking_vis/Final_" + name + "_tracking.mp4")
+        scene_graph.tracking_video("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/" + name, "/home/tjark/Documents/growing_scene_graphs/tracking_vis/ICP_" + name + "_tracking.mp4")
 
-        #### Example for adding drawers to the scene graph
-        masks = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_masks_drawers.npy")
-        points = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_pcd_drawers.npy")
+        # #### Example for adding drawers to the scene graph
+        # masks = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_masks_drawers.npy")
+        # points = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_pcd_drawers.npy")
 
-        handle_masks = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_masks_handles.npy")
-        handle_points = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_pcd_handles.npy")
+        # handle_masks = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_masks_handles.npy")
+        # handle_points = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_pcd_handles.npy")
 
-        points = spot_to_aria_coords(points, T_aria)
-        handle_points = spot_to_aria_coords(handle_points, T_aria)
+        # points = spot_to_aria_coords(points, T_aria)
+        # handle_points = spot_to_aria_coords(handle_points, T_aria)
 
-        for i in range(masks.shape[0]):
-            mask = masks[i, :].astype(bool)
-            mask_handle = handle_masks[i, :].astype(bool)
-            pcd_points = points[mask]
-            pcd_handle_points = handle_points[mask_handle]
+        # for i in range(masks.shape[0]):
+        #     mask = masks[i, :].astype(bool)
+        #     mask_handle = handle_masks[i, :].astype(bool)
+        #     pcd_points = points[mask]
+        #     pcd_handle_points = handle_points[mask_handle]
 
-            scene_graph.add_drawer(np.array(pcd_points), np.array(pcd_handle_points))
+        #     scene_graph.add_drawer(np.array(pcd_points), np.array(pcd_handle_points))
         
 
-        scene_graph.visualize()
+        # scene_graph.visualize()
 
         
 

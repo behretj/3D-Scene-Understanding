@@ -296,8 +296,8 @@ def icp_alignment(source_path, target_path, T_init=np.eye(4)):
     source = o3d.io.read_point_cloud(source_path)
     target = o3d.io.read_point_cloud(target_path)
 
-    source.estimate_normals()
-    target.estimate_normals()
+    # source.estimate_normals()
+    # target.estimate_normals()
 
     reg_p2l = o3d.pipelines.registration.registration_icp(
         source, target, 0.05, T_init,
