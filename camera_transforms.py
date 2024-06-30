@@ -291,3 +291,20 @@ def spot_to_aria_coords(points, aria_transform):
     return points
 
 
+def icp_alignment(source_path, target_path, T_init=np.eye(4)):
+    """Aligns the source pointcloud to the target pointcloud using ICP."""
+    source = o3d.io.read_point_cloud(source_path)
+    target = o3d.io.read_point_cloud(target_path)
+
+    source.estimate_normals()
+    target.estimate_normals()
+
+    reg_p2l = o3d.pipelines.registration.registration_icp(
+        source, target, 0.05, T_init,
+        # estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+        criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=4000))
+    
+    source.transform(reg_p2l.transformation)
+    o3d.io.write_point_cloud(source_path[:-4] + "_icp.ply", source)
+
+    return source_path[:-4] + "_icp.ply"
