@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import open3d as o3d
 from scene_graph import SceneGraph
 from camera_transforms import pose_aria_pointcloud, pose_ipad_pointcloud, transform_ipad_to_aria_pointcloud, spot_to_aria_coords
 from utils import vis_detections, get_all_images, mask3d_labels, create_video, stitch_videos
@@ -59,30 +60,30 @@ if __name__ == "__main__":
         scene_graph.remove_category("doorframe")
 
         scene_graph.color_with_ibm_palette()
-
+        
         # scene_graph.track_changes("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/" + name)
         # scene_graph.tracking_video("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/" + name, "/home/tjark/Documents/growing_scene_graphs/tracking_vis/Final_" + name + "_tracking.mp4")
 
-        #### Example for adding drawers to the scene graph
-        masks = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_masks_drawers.npy")
-        points = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_pcd_drawers.npy")
+        # #### Example for adding drawers to the scene graph
+        # masks = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_masks_drawers.npy")
+        # points = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_pcd_drawers.npy")
 
-        handle_masks = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_masks_handles.npy")
-        handle_points = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_pcd_handles.npy")
+        # handle_masks = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_masks_handles.npy")
+        # handle_points = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_pcd_handles.npy")
 
-        points = spot_to_aria_coords(points, T_aria)
-        handle_points = spot_to_aria_coords(handle_points, T_aria)
+        # points = spot_to_aria_coords(points, T_aria)
+        # handle_points = spot_to_aria_coords(handle_points, T_aria)
 
-        for i in range(masks.shape[0]):
-            mask = masks[i, :].astype(bool)
-            mask_handle = handle_masks[i, :].astype(bool)
-            pcd_points = points[mask]
-            pcd_handle_points = handle_points[mask_handle]
+        # for i in range(masks.shape[0]):
+        #     mask = masks[i, :].astype(bool)
+        #     mask_handle = handle_masks[i, :].astype(bool)
+        #     pcd_points = points[mask]
+        #     pcd_handle_points = handle_points[mask_handle]
 
-            scene_graph.add_drawer(np.array(pcd_points), np.array(pcd_handle_points))
-        
+        #     scene_graph.add_drawer(np.array(pcd_handle_points), np.array(pcd_points))
 
-        scene_graph.visualize()
+
+        # scene_graph.visualize(labels=True)
 
         
 

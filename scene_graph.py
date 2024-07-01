@@ -54,7 +54,8 @@ class DrawerNode(ObjectNode):
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(drawer_points)
         self.equation, inliers = pcd.segment_plane(distance_threshold=0.02, ransac_n=3, num_iterations=1000)
-        self.drawer_points = np.array(pcd.select_by_index(inliers))
+        inlier_cloud = pcd.select_by_index(inliers)
+        self.drawer_points = np.array(inlier_cloud.points)
         super().__init__(object_id, color, sem_label, points, confidence, movable)        
     
     def update_hull_tree(self):
@@ -66,6 +67,7 @@ class DrawerNode(ObjectNode):
         return np.dot(self.equation[:3], point) + self.equation[3] > 0
     
     def transform(self, *args):
+        # TODO: haven't checked if this is working correctly
         for arg in args:
             if isinstance(arg, np.ndarray):
                 if arg.shape == (3,):
@@ -123,20 +125,39 @@ class SceneGraph:
         self.nodes[self.index] = DrawerNode(self.index, np.random.rand(3), 25, points, drawer_points)
         self.labels.setdefault(25, []).append(self.index)
         self.ids.append(self.index)
+        # TODO: theoretically, the shelf it gets connected to has to be updated as well (same for regular node)
+        self.update_connection(self.nodes[self.index], initial=True)
         self.index += 1
 
-    def update_connection(self, node):
+    def update_connection(self, node, initial=False):
         """ Updates the connection of the given node to the closest other node. Deletes the previous connections."""
         min_index, min_dist = None, None
         if isinstance(node, DrawerNode):
             # iterate through all added shelfs in the scene (TODO: how to handle this in the future),
             # this restricts drawers to be added to shelf only
-            for other in self.labels.get(8, []):
+            for idx in self.labels.get(8, []):
+                other = self.nodes[idx]
                 if other.object_id != node.object_id:
                     dist = np.linalg.norm(node.centroid - other.centroid)
                     if min_dist is None or dist < min_dist:
                         min_dist = dist
                         min_index = other.object_id
+            # TODO: icp alignment is working, but this needs to be handeled in a better way (for instance, use the node's transformation method)
+            if initial:
+                shelf_points = self.nodes[min_index].points
+                target = o3d.geometry.PointCloud()
+                target.points = o3d.utility.Vector3dVector(shelf_points)
+                source = o3d.geometry.PointCloud()
+                source.points = o3d.utility.Vector3dVector(node.drawer_points)
+                icp = o3d.pipelines.registration.registration_icp(
+                    source, target, 0.05,
+                    criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=4000))
+                source.transform(icp.transformation)
+                handle = o3d.geometry.PointCloud()
+                handle.points = o3d.utility.Vector3dVector(node.points)
+                handle.transform(icp.transformation)
+                node.drawer_points = np.array(source.points)
+                node.points = np.array(handle.points)
         elif isinstance(node, ObjectNode):
             for other in self.nodes.values():
                 if other.object_id != node.object_id:
@@ -181,6 +202,15 @@ class SceneGraph:
             labels = [int(label.strip()) for label in f.readlines()]
         return np.array(pcd.points), np.array(pcd.colors), np.array(labels)
 
+    def create_mesh(self, id):
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(self.nodes[id].points)
+        pcd.paint_uniform_color(self.nodes[id].color)
+        pcd.estimate_normals()
+        mesh, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+            pcd, depth=12)
+        return mesh
+    
     def build(self, file_path, label_file):
         points, colors, labels = self.read_ply(file_path, label_file)
 
@@ -248,8 +278,6 @@ class SceneGraph:
         # TODO: rebuild this logic
         self.init_graph()
         self.tree = KDTree(np.array([self.nodes[index].centroid for index in self.ids]))
-        print(self.connections)
-        print(self.has_connections)
 
     def get_distance(self, point):
         _, idx = self.tree.query(point)
@@ -278,7 +306,6 @@ class SceneGraph:
         self.nodes.pop(remove_index, None)
         self.ids.remove(remove_index)
         deleted = self.connections.pop(remove_index, None)  
-        print(remove_index, deleted)   
         # update the connections of the other nodes that were connected to the removed node
         for id in self.has_connections.get(remove_index, []):
             del self.connections[id]
@@ -380,7 +407,10 @@ class SceneGraph:
         }
 
         for id, label in object_id_to_sem_label.items():
+            old_label = self.nodes[id].sem_label
             self.nodes[id].sem_label = label
+            self.labels[old_label].remove(id)
+            self.labels.setdefault(label, []).append(id)
             
 
     def track_hand(self, scan_dir, left=True):
@@ -825,6 +855,9 @@ class SceneGraph:
         for node in self.nodes.values():
             pcd = o3d.geometry.PointCloud()
             pcd_points = node.points + scale * node.centroid
+            if isinstance(node, DrawerNode):
+                drawer_points = node.drawer_points + scale * node.centroid
+                pcd_points = np.concatenate((pcd_points, drawer_points))
             pcd.points = o3d.utility.Vector3dVector(pcd_points)
             pcd_color = np.array(node.color, dtype=np.float64)
             pcd.paint_uniform_color(pcd_color)
