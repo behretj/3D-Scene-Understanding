@@ -37,8 +37,7 @@ def register_drawers(dir_path):
 
     
     
-    bboxes_3d = detections_to_bboxes(dir_path, "/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/mesh_labelled_mask3d_dataset_1_y_up.ply", detections) #  TODO: get the bounding boxes from the detections
-
+    bboxes_3d = detections_to_bboxes("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/mesh_labelled_mask3d_dataset_1_y_up.ply", detections) #  TODO: get the bounding boxes from the detections
 
     # this will contain all the detected non-overlapping boxes
     registered_boxes = []
@@ -59,4 +58,4 @@ def register_drawers(dir_path):
 
 
 if __name__ == "__main__":
-    register_drawers("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1")
+    register_drawers("/home/tjark/Documents/growing_scene_graphs/tmp")
