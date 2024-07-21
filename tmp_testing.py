@@ -1,6 +1,7 @@
 import numpy as np
 import open3d as o3d
 import pandas as pd
+import open3d as o3d
 from scene_graph import SceneGraph
 from camera_transforms import pose_aria_pointcloud, pose_ipad_pointcloud, icp_alignment, transform_ipad_to_aria_pointcloud, spot_to_aria_coords
 from utils import vis_detections, get_all_images, mask3d_labels, create_video, stitch_videos

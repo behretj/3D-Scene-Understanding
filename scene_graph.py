@@ -15,9 +15,9 @@ from tqdm import tqdm
 from drawer_integration import register_drawers
 
 class ObjectNode:
-    def __init__(self, object_id, centroid, color, sem_label, points, confidence=None, movable=True):
+    def __init__(self, object_id, color, sem_label, points, confidence=None, movable=True):
         self.object_id = object_id
-        self.centroid = centroid
+        self.centroid = np.mean(points, axis=0)
         self.points = points
         self.sem_label = sem_label
         self.color = color
@@ -27,28 +27,167 @@ class ObjectNode:
     
     def update_hull_tree(self):
         self.hull_tree = KDTree(self.points[ConvexHull(self.points).vertices])
+    
+    def transform(self, *args):
+        """ Transform the points of the node using a translation, rotation, or homogeneous transformation matrix."""
+        for arg in args:
+            if isinstance(arg, np.ndarray):
+                if arg.shape == (3,):
+                    self.centroid += arg
+                    self.points += arg
+                    self.update_hull_tree()
+                elif arg.shape == (3, 3):
+                    self.points = np.dot(arg, self.points.T).T
+                    self.centroid = np.dot(arg, self.centroid)
+                    self.update_hull_tree()
+                elif arg.shape == (4, 4):
+                    self.points = np.dot(arg, np.vstack((self.points.T, np.ones(self.points.shape[0])))).T[:, :3]
+                    self.centroid = np.dot(arg, np.append(self.centroid, 1))[:3]
+                    self.update_hull_tree()
+                else:
+                    raise ValueError("Invalid argument shape. Expected (3,) for translation, (3,3) for rotation, or (4,4) for homogeneous transformation.")
+            else:
+                raise TypeError("Invalid argument type. Expected numpy.ndarray.")
+
+
+class DrawerNode(ObjectNode):
+    def __init__(self, object_id, color, sem_label, points, drawer_points, confidence=1.0, movable=True):
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(drawer_points)
+        self.equation, inliers = pcd.segment_plane(distance_threshold=0.02, ransac_n=3, num_iterations=1000)
+        inlier_cloud = pcd.select_by_index(inliers)
+        # TODO: remove drawer points in the logic
+        self.drawer_points = np.array(inlier_cloud.points)
+        super().__init__(object_id, color, sem_label, points, confidence, movable)        
+    
+    def update_hull_tree(self):
+        # both the handle and the drawer points belong to the convex hull of the object
+        all_points = np.vstack((self.points, self.drawer_points))
+        self.hull_tree = KDTree(all_points[ConvexHull(all_points).vertices])
+    
+    def sign_check(self, point):
+        return np.dot(self.equation[:3], point) + self.equation[3] > 0
+    
+    def transform(self, *args):
+        # TODO: haven't checked if this is working correctly
+        for arg in args:
+            if isinstance(arg, np.ndarray):
+                if arg.shape == (3,):
+                    normal = self.equation[:3]
+                    normal /= np.linalg.norm(normal)
+                    translation = np.dot(arg, normal) * normal
+                    self.centroid += translation
+                    self.points += translation
+                    self.drawer_points += translation
+                    self.update_hull_tree()
+                elif arg.shape == (4, 4):
+                    translation = arg[:3, 3]
+                    normal = self.equation[:3]
+                    normal /= np.linalg.norm(normal)
+                    translation = np.dot(translation, normal) * normal
+                    self.points += translation
+                    self.centroid += translation
+                    self.drawer_points += translation
+                    self.update_hull_tree()
+                else:
+                    raise ValueError("Invalid argument shape. Expected (3,) for translation or (4,4) for homogeneous transformation.")
+            else:
+                raise TypeError("Invalid argument type. Expected numpy.ndarray.")
+
+        
 
 class SceneGraph:
     def __init__(self, label_mapping = dict(), min_confidence = 0.0,  k=2, unmovable=[]):
         self.index = 0
-        self.nodes = []
+        self.nodes = dict()
+        self.labels = dict()
+        # TODO: find better names for these two attributes, from, to, or something similar
+        self.connections = dict()
+        self.has_connections = dict()
         self.tree = None
+        self.ids = []
         self.k = k
         self.label_mapping = label_mapping
         self.min_confidence = min_confidence
         self.unmovable = unmovable
 
-    def add_node(self, centroid, color, sem_label, points, confidence=None):
+    def add_node(self, color, sem_label, points, confidence=None):
+        # TODO: how do I update the connections to always have a clean scene graph structure
         if self.label_mapping.get(sem_label, "ID not found") in self.unmovable:
             # mark objects as unmovable if a list was given
             # TODO: could in the future either be a complete list or LLM api request for open vocabulary
-            self.nodes.append(ObjectNode(self.index, centroid, np.array([0.5, 0.5, 0.5]), sem_label, points, confidence, movable=False))
+            self.nodes[self.index] = ObjectNode(self.index, np.array([0.5, 0.5, 0.5]), sem_label, points, confidence, movable=False)
         else:
-            self.nodes.append(ObjectNode(self.index, centroid, color, sem_label, points, confidence))
+            self.nodes[self.index] = ObjectNode(self.index, color, sem_label, points, confidence)
+        self.labels.setdefault(sem_label, []).append(self.index)
+        self.ids.append(self.index)
+        self.index += 1
+    
+    def add_drawer(self, points, drawer_points):
+        self.nodes[self.index] = DrawerNode(self.index, np.random.rand(3), 25, points, drawer_points)
+        self.labels.setdefault(25, []).append(self.index)
+        self.ids.append(self.index)
+        # TODO: theoretically, the shelf it gets connected to has to be updated as well (same for regular node)
+        self.update_connection(self.nodes[self.index], initial=True)
         self.index += 1
 
+    def update_connection(self, node, initial=False):
+        """ Updates the connection of the given node to the closest other node. Deletes the previous connections."""
+        min_index, min_dist = None, None
+        if isinstance(node, DrawerNode):
+            # iterate through all added shelfs in the scene (TODO: how to handle this in the future),
+            # this restricts drawers to be added to shelf only
+            for idx in self.labels.get(8, []):
+                other = self.nodes[idx]
+                if other.object_id != node.object_id:
+                    dist = np.linalg.norm(node.centroid - other.centroid)
+                    if min_dist is None or dist < min_dist:
+                        min_dist = dist
+                        min_index = other.object_id
+            # TODO: icp alignment is working, but this needs to be handeled in a better way (for instance, use the node's transformation method)
+            if initial:
+                shelf_points = self.nodes[min_index].points
+                target = o3d.geometry.PointCloud()
+                target.points = o3d.utility.Vector3dVector(shelf_points)
+                source = o3d.geometry.PointCloud()
+                source.points = o3d.utility.Vector3dVector(node.drawer_points)
+                icp = o3d.pipelines.registration.registration_icp(
+                    source, target, 0.05,
+                    criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=4000))
+                source.transform(icp.transformation)
+                handle = o3d.geometry.PointCloud()
+                handle.points = o3d.utility.Vector3dVector(node.points)
+                handle.transform(icp.transformation)
+                node.drawer_points = np.array(source.points)
+                node.points = np.array(handle.points)
+        elif isinstance(node, ObjectNode):
+            for other in self.nodes.values():
+                if other.object_id != node.object_id:
+                    dist = np.linalg.norm(node.centroid - other.centroid)
+                    if min_dist is None or dist < min_dist:
+                        min_dist = dist
+                        min_index = other.object_id
+        else:
+            raise TypeError("Invalid node type. Expected ObjectNode or DrawerNode.")
+        # Actual updating of the connection:
+        # set a one-way connection from the current node to the closest partner, if one was found
+        tmp = self.connections.get(node.object_id, None)
+        if min_index is not None and tmp != min_index:
+            # the node is not connected to tmp anymore
+            if tmp is not None:
+                self.has_connections[tmp].remove(node.object_id)
+            # each node has only one connection to another node
+            self.connections[node.object_id] = min_index
+            # a node might has mutiple connections from other nodes
+            self.has_connections.setdefault(min_index, []).append(node.object_id)
+    
+    def init_graph(self):
+        """ This assumes, no connection has been made before. """
+        for node in self.nodes.values():
+            self.update_connection(node)
+
     def get_node_info(self):
-        for node in self.nodes:
+        for node in self.nodes.values():
             print(f"Object ID: {node.object_id}")
             print(f"Centroid: {node.centroid}")
             print("Semantic Label: " + self.label_mapping.get(node.sem_label, "ID not found"))
@@ -65,17 +204,27 @@ class SceneGraph:
             labels = [int(label.strip()) for label in f.readlines()]
         return np.array(pcd.points), np.array(pcd.colors), np.array(labels)
 
+    def create_mesh(self, id):
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(self.nodes[id].points)
+        pcd.paint_uniform_color(self.nodes[id].color)
+        pcd.estimate_normals()
+        mesh, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+            pcd, depth=12)
+        return mesh
+    
     def build(self, file_path, label_file):
         points, colors, labels = self.read_ply(file_path, label_file)
 
         unique_labels = np.unique(labels, axis=0)
         for label in unique_labels:
             indices = np.where(labels == label)
-            mean_point = np.mean(points[indices], axis=0)
             color = np.array(colors[indices])
-            self.add_node(mean_point, color[0], label, points[indices])
+            self.add_node(color[0], label, points[indices])
 
-        sorted_nodes = sorted(self.nodes, key=lambda node: node.object_id)
+        # TODO: rebuild this logic
+        self.init_graph()
+        self.tree = KDTree(np.array([self.nodes[index].centroid for index in self.ids]))
 
         self.tree = KDTree(np.array([node.centroid for node in sorted_nodes]))
 
@@ -134,8 +283,7 @@ class SceneGraph:
             node_points = np_points[np.logical_and(labels == 1 , mask3d_labels == values[i])]
             colors = np_colors[np.logical_and(labels == 1 , mask3d_labels == values[i])]
             if confidences[i] > self.min_confidence and node_points.shape[0] > 0:
-                mean_point = np.mean(node_points, axis=0)
-                self.add_node(mean_point, colors[0], values[i], node_points, confidences[i])
+                self.add_node(colors[0], values[i], node_points, confidences[i])
         
         if drawer_detection and indices is not None:
             for ind_list in indices:
@@ -143,34 +291,17 @@ class SceneGraph:
                 # TODO: drawer detection currently only works with handles, but it's supposed to work without
                 self.add_drawer(drawer_points, drawer_points)
         
-        sorted_nodes = sorted(self.nodes, key=lambda node: node.object_id)
-        
-        self.tree = KDTree(np.array([node.centroid for node in sorted_nodes]))
-    
-    def add_drawer(self, drawer_points, handle_points):
-        all_points = np.vstack((drawer_points, handle_points))
-        mean_point = np.mean(all_points, axis=0)
-        # bbox = o3d.geometry.OrientedBoundingBox.create_from_points(o3d.utility.Vector3dVector(all_points))
-        # bbox_min = bbox.get_minimal_oriented_bounding_box()
-        # for node in self.nodes:
-        #     ind_list = bbox_min.get_point_indices_within_bounding_box(o3d.utility.Vector3dVector(node.points))
-        #     mask = np.isin(np.arange(len(node.points)), ind_list, invert=True)
-        #     node.points = node.points[mask]
-
-        # 25 corresponds to label of door
-        self.add_node(mean_point, np.random.rand(3), 25, all_points)
-        sorted_nodes = sorted(self.nodes, key=lambda node: node.object_id)
-        
-        self.tree = KDTree(np.array([node.centroid for node in sorted_nodes]))
+        # TODO: rebuild this logic
+        self.init_graph()
+        self.tree = KDTree(np.array([self.nodes[index].centroid for index in self.ids]))
 
     def get_distance(self, point):
         _, idx = self.tree.query(point)
-        node = self.nodes[idx]
-        return np.linalg.norm(point - node.centroid)
+        return np.linalg.norm(point - self.nodes[self.ids[idx]].centroid)
     
     def draw_bboxes(self):
         bboxes = []
-        for node in self.nodes:
+        for node in self.nodes.values():
             bboxes += [self.nearest_neighbor_bbox(node.centroid)]
         return bboxes
     
@@ -181,59 +312,56 @@ class SceneGraph:
         distances = np.array([self.get_distance(point) for point in points])
         index = np.argmin(distances)
         _, idx = self.tree.query(points[index])
-        node = self.nodes[idx]
+        node = self.nodes[self.ids[idx]]
         bbox = o3d.geometry.AxisAlignedBoundingBox.create_from_points(o3d.utility.Vector3dVector(node.points))
         bbox.color = [1,0,0]
         return bbox
     
     def remove_node(self, remove_index):
-        try:
-            node_index = 0
-            for node in self.nodes:
-                if node.object_id == remove_index:
-                    break
-                node_index += 1
-            self.nodes.pop(node_index)
-            self.tree = KDTree(np.array([node.centroid for node in self.nodes]))
-        except IndexError:
-            print("Node not found.")
+        # TODO: we are not removing the self.labels here
+        self.nodes.pop(remove_index, None)
+        self.ids.remove(remove_index)
+        deleted = self.connections.pop(remove_index, None)  
+        # update the connections of the other nodes that were connected to the removed node
+        for id in self.has_connections.get(remove_index, []):
+            del self.connections[id]
+            self.update_connection(self.nodes[id])
+        self.has_connections.pop(remove_index, None)
+        self.has_connections.get(deleted, []).remove(remove_index)
+        self.tree = KDTree(np.array([self.nodes[index].centroid for index in self.ids]))
 
     def remove_category(self, category):
-        for node in self.nodes:
-            if self.label_mapping.get(node.sem_label, "ID not found") == category:
-                self.remove_node(node.object_id)
+        labels_to_remove = [label for label, cat in self.label_mapping.items() if cat == category]
+        for label in labels_to_remove:
+            for index in self.labels.get(label, []):
+                self.remove_node(index)
+            self.labels.pop(label, None)
 
     
     def transform(self, idx, *args):
-        """ Transform the points of a node (identified by idx) using a translation, rotation, or homogeneous transformation matrix."""
-        for arg in args:
-            if isinstance(arg, np.ndarray):
-                if arg.shape == (3,):
-                    # Apply the translation
-                    self.nodes[idx].centroid += arg
-                    self.nodes[idx].points += arg
-                    self.nodes[idx].hull_tree = KDTree(self.nodes[idx].points[ConvexHull(self.nodes[idx].points).vertices])
-                elif arg.shape == (3, 3):
-                    # Apply the rotation
-                    self.nodes[idx].points = np.dot(arg, self.nodes[idx].points.T).T
-                    self.nodes[idx].centroid = np.dot(arg, self.nodes[idx].centroid)
-                    self.nodes[idx].hull_tree = KDTree(self.nodes[idx].points[ConvexHull(self.nodes[idx].points).vertices])
-                elif arg.shape == (4, 4):
-                    # Apply the homogeneous transform matrix
-                    self.nodes[idx].points = np.dot(arg, np.vstack((self.nodes[idx].points.T, np.ones(self.nodes[idx].points.shape[0])))).T[:, :3]
-                    self.nodes[idx].centroid = np.dot(arg, np.append(self.nodes[idx].centroid, 1))[:3]
-                    self.nodes[idx].hull_tree = KDTree(self.nodes[idx].points[ConvexHull(self.nodes[idx].points).vertices])
-                    # TODO: could be replaced by self.nodes[idx].update_hull_tree()?
-                else:
-                    raise ValueError("Invalid argument shape. Expected (3,) for rotation, (3,3) for rotation, or (4,4) for homogeneous transformation.")
-            else:
-                raise TypeError("Invalid argument type. Expected numpy.ndarray.")
-
-        self.tree = KDTree(np.array([node.centroid for node in self.nodes]))
+        """ Transforms the node with the given index. Takes care of updating the connections."""
+        # node is transformed
+        self.nodes[idx].transform(*args)
+        # all the nodes that this node is connected to might change their connection to a closer other node, hence the updating
+        try:
+            for neighbor in self.has_connections.get(idx, []):
+                self.update_connection(self.nodes[neighbor])
+        except KeyError:
+            print(idx)
+            print(self.nodes.keys())
+            print(self.has_connections)
+            raise KeyError("Key not found.")
+        # update the own connection
+        self.update_connection(self.nodes[idx])
+        # the newly connected node might change their connections as well
+        self.update_connection(self.nodes[self.connections[idx]])
+        # tree needs to be built again (TODO: optimize this)
+        self.tree = KDTree(np.array([self.nodes[index].centroid for index in self.ids]))
+        
 
     def instance_segmentation(self):
         """Still experimental. TODO: Enhance."""
-        for node in self.nodes:
+        for node in self.nodes.values():
             print(self.label_mapping.get(node.sem_label, "ID not found"))
             db = DBSCAN(eps=0.06, min_samples=250).fit(node.points)
             labels = db.labels_
@@ -251,6 +379,7 @@ class SceneGraph:
             o3d.visualization.draw_geometries([clustered_pcd])
 
     def visualize_drawers(self, points, masks):
+        """ This is just a temporary helper function. """
         pcds = []
         for i in range(masks.shape[0]):
             mask = masks[i, :].astype(bool)
@@ -268,7 +397,7 @@ class SceneGraph:
                 [0.70196078, 0.53333333, 1.], [0.89803922, 0.22352941, 0.20784314], [1., 0.25098039, 0.50588235]])
 
         index = 0
-        for node in self.nodes:
+        for node in self.nodes.values():
             if node.movable:
                 node.color = colors[index]
                 index += 1
@@ -293,9 +422,11 @@ class SceneGraph:
             0: 749
         }
 
-        for node in self.nodes:
-            if node.object_id in object_id_to_sem_label:
-                node.sem_label = object_id_to_sem_label[node.object_id]
+        for id, label in object_id_to_sem_label.items():
+            old_label = self.nodes[id].sem_label
+            self.nodes[id].sem_label = label
+            self.labels[old_label].remove(id)
+            self.labels.setdefault(label, []).append(id)
             
 
     def track_hand(self, scan_dir, left=True):
@@ -397,7 +528,10 @@ class SceneGraph:
                 else:
                     # Get the nearest 4 objects to the palm position
                     _, neighbor_indices = self.tree.query(palm_position_world, k=4)
-                    neighbor_indices = [index for index in neighbor_indices if self.nodes[index].movable]
+                    # print(neighbor_indices)
+                    # print(self.ids)
+                    neighbor_indices = [self.ids[n_idx] for n_idx in neighbor_indices if self.nodes[self.ids[n_idx]].movable]
+                    # print(neighbor_indices)
                     
                     # No object is close by
                     if len(neighbor_indices)==0:
@@ -468,15 +602,9 @@ class SceneGraph:
         for left_info, right_info in zip(left, right):
             pose, left_id, left_pos, left_offset, right_id, right_pos, right_offset = None, None, None, None, None, None, None
             if left_info is not None:
-                pose = left_info[1]
-                left_id = left_info[0]
-                left_pos = left_info[2]
-                left_offset = left_info[3]
+                left_id, pose, left_pos, left_offset = left_info
             if right_info is not None:
-                pose = right_info[1]
-                right_id = right_info[0]
-                right_pos = right_info[2]
-                right_offset = right_info[3]
+                right_id, pose, right_pos, right_offset = right_info
             tracking += [(pose, left_id, left_pos, left_offset, right_id, right_pos, right_offset)]
         
         return tracking
@@ -544,7 +672,7 @@ class SceneGraph:
         tracking = self.merge_tracking(scan_dir)
         
         geometries = []
-        for node in self.nodes:
+        for node in self.nodes.values:
             pcd = o3d.geometry.PointCloud()
             pcd_points = node.points + scale * node.centroid
             pcd.points = o3d.utility.Vector3dVector(pcd_points)
@@ -576,7 +704,7 @@ class SceneGraph:
                 scene.scene.add_geometry(name, geometry, material)
 
             if labels:
-                for node in self.nodes:
+                for node in self.nodes.values():
                     label = self.label_mapping.get(node.sem_label, "ID not found")
                     point = node.centroid + scale * node.centroid
                     offset = np.array([0, 0, 0.1])
@@ -740,9 +868,12 @@ class SceneGraph:
         line_mat.shader = "unlitLine"
         line_mat.line_width = 2
 
-        for node in self.nodes:
+        for node in self.nodes.values():
             pcd = o3d.geometry.PointCloud()
             pcd_points = node.points + scale * node.centroid
+            if isinstance(node, DrawerNode):
+                drawer_points = node.drawer_points + scale * node.centroid
+                pcd_points = np.concatenate((pcd_points, drawer_points))
             pcd.points = o3d.utility.Vector3dVector(pcd_points)
             pcd_color = np.array(node.color, dtype=np.float64)
             pcd.paint_uniform_color(pcd_color)
@@ -750,8 +881,8 @@ class SceneGraph:
 
         if centroids:
             centroid_pcd = o3d.geometry.PointCloud()
-            centroids_xyz = np.array([node.centroid + scale * node.centroid for node in self.nodes])
-            centroids_colors = np.array([node.color for node in self.nodes], dtype=np.float64) / 255.0
+            centroids_xyz = np.array([node.centroid + scale * node.centroid for node in self.nodes.values()])
+            centroids_colors = np.array([node.color for node in self.nodes.values()], dtype=np.float64) / 255.0
             centroid_pcd.points = o3d.utility.Vector3dVector(centroids_xyz)
             centroid_pcd.colors = o3d.utility.Vector3dVector(centroids_colors)
             geometries.append((centroid_pcd, "centroids", material))
@@ -760,14 +891,12 @@ class SceneGraph:
             line_points = []
             line_indices = []
             idx = 0
-            for node in self.nodes:
-                _, indices = self.tree.query(node.centroid, k=self.k)
-                for idx_neighbor in indices[1:]:
-                    neighbor = self.nodes[idx_neighbor]
-                    line_points.append(node.centroid + scale * node.centroid)
-                    line_points.append(neighbor.centroid + scale * neighbor.centroid)
-                    line_indices.append([idx, idx + 1])
-                    idx += 2
+            # TODO: this logic needs to be rebuild
+            for start, end in self.connections.items():
+                line_points.append(self.nodes[start].centroid + scale * self.nodes[start].centroid)
+                line_points.append(self.nodes[end].centroid + scale * self.nodes[end].centroid)
+                line_indices.append([idx, idx + 1])
+                idx += 2
             if line_points:
                 line_set = o3d.geometry.LineSet(
                     points=o3d.utility.Vector3dVector(line_points),
@@ -800,7 +929,7 @@ class SceneGraph:
             scene.setup_camera(60, bounds, bounds.get_center())
 
         if labels:
-            for node in self.nodes:
+            for node in self.nodes.values():
                 label = self.label_mapping.get(node.sem_label, "ID not found")
                 point = node.centroid + scale * node.centroid
                 offset = np.array([0, 0, 0.01])
