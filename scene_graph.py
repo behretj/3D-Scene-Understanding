@@ -144,7 +144,8 @@ class SceneGraph:
                     if min_dist is None or dist < min_dist:
                         min_dist = dist
                         min_index = other.object_id
-            # TODO: icp alignment is working, but this needs to be handeled in a better way (for instance, use the node's transformation method)
+            # TODO: we can get rid off his in the future
+            # TODO: icp alignment is working, but this needs to be handeled in a better way (for instance, use the node's transformation method).
             if initial:
                 shelf_points = self.nodes[min_index].points
                 target = o3d.geometry.PointCloud()
@@ -225,8 +226,6 @@ class SceneGraph:
         # TODO: rebuild this logic
         self.init_graph()
         self.tree = KDTree(np.array([self.nodes[index].centroid for index in self.ids]))
-
-        self.tree = KDTree(np.array([node.centroid for node in sorted_nodes]))
 
     def build_mask3d(self, label_path, pcd_path, drawer_detection=False):
         with open(label_path, 'r') as file:

@@ -59,7 +59,7 @@ def register_drawers(dir_path):
     # stores tuples containing the detected box(es) and its/their confidence(s)
     detections = []
     if os.path.exists(os.path.join(dir_path, 'detections.pkl')):
-        with open('detections.pkl', 'rb') as f:
+        with open(os.path.join(dir_path, 'detections.pkl'), 'rb') as f:
             detections = pickle.load(f)
     else:
         for image_name in sorted(glob.glob(os.path.join(dir_path, 'frame_*.jpg'))):
