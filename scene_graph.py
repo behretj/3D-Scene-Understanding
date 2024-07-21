@@ -12,6 +12,7 @@ from projectaria_tools.core import data_provider
 from projectaria_tools.core.mps.utils import get_nearest_wrist_and_palm_pose, get_nearest_pose
 import imageio, datetime, time
 from tqdm import tqdm
+from drawer_integration import register_drawers
 
 class ObjectNode:
     def __init__(self, object_id, centroid, color, sem_label, points, confidence=None, movable=True):
@@ -78,7 +79,7 @@ class SceneGraph:
 
         self.tree = KDTree(np.array([node.centroid for node in sorted_nodes]))
 
-    def build_mask3d(self, label_path, pcd_path):
+    def build_mask3d(self, label_path, pcd_path, drawer_detection=False):
         with open(label_path, 'r') as file:
             lines = file.readlines()
         
@@ -99,6 +100,12 @@ class SceneGraph:
             num_lines = len(file.readlines())
 
         mask3d_labels = np.zeros(num_lines, dtype=np.int64)
+
+        if drawer_detection:
+            indices = register_drawers("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1")
+            for ind_list in indices:
+                # set label of drawers to 25
+                mask3d_labels[ind_list] = 25
 
         pcd = o3d.io.read_point_cloud(pcd_path)
 
@@ -129,6 +136,12 @@ class SceneGraph:
             if confidences[i] > self.min_confidence and node_points.shape[0] > 0:
                 mean_point = np.mean(node_points, axis=0)
                 self.add_node(mean_point, colors[0], values[i], node_points, confidences[i])
+        
+        if drawer_detection and indices is not None:
+            for ind_list in indices:
+                drawer_points = np_points[ind_list]
+                # TODO: drawer detection currently only works with handles, but it's supposed to work without
+                self.add_drawer(drawer_points, drawer_points)
         
         sorted_nodes = sorted(self.nodes, key=lambda node: node.object_id)
         

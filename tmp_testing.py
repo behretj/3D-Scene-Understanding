@@ -8,7 +8,7 @@ from utils import vis_detections, get_all_images, mask3d_labels, create_video, s
 if __name__ == "__main__":
 
     folder_names = [
-        # "Easy_Ball_Both_Hands",
+        "Easy_Ball_Both_Hands",
         # "Easy_Frame_Both_Hands",
         # "Easy_Frame_Left_Hand",
         # "Easy_Frame_Right_Hand",
@@ -54,7 +54,7 @@ if __name__ == "__main__":
         # transformed_pcd_filename = transform_ipad_to_aria_pointcloud("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/mesh_labelled_mask3d_dataset_1_y_up.ply", T_ipad, T_aria)
         
         
-        scene_graph.build_mask3d("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/predictions_mask3d_1.txt", icp_aligned_filename)
+        scene_graph.build_mask3d("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/predictions_mask3d_1.txt", icp_aligned_filename, drawer_detection=True)
         # scene_graph.build_mask3d("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/predictions_mask3d_1.txt", "/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1/mesh_labelled_mask3d_dataset_1_y_up_transformed.ply")
 
         # #### Make the scene Graph more beautiful
@@ -66,8 +66,10 @@ if __name__ == "__main__":
 
         scene_graph.color_with_ibm_palette()
 
+        scene_graph.visualize()
+
         # scene_graph.track_changes("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/" + name)
-        scene_graph.tracking_video("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/" + name, "/home/tjark/Documents/growing_scene_graphs/tracking_vis/ICP_" + name + "_tracking.mp4")
+        # scene_graph.tracking_video("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/" + name, "/home/tjark/Documents/growing_scene_graphs/tracking_vis/ICP_" + name + "_tracking.mp4")
 
         # #### Example for adding drawers to the scene graph
         # masks = np.load("SceneGraph-Dataset/iPad-Scan-1/cabinet_masks_drawers.npy")

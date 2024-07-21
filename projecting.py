@@ -1,7 +1,6 @@
 import open3d as o3d
 import numpy as np
-import json
-import cv2
+import json, cv2
 import matplotlib.pyplot as plt
 
 def parse_json(file_path):
@@ -79,7 +78,7 @@ def compute_rotation_matrix(normal_dst):
     R = np.eye(3) + vx + (vx @ vx) * ((1 - c) / (s ** 2))
     return R
 
-def project_points_bbox(points_3d, extrinsics, intrinsics, width, height, bbox, grid=10):
+def project_points_bbox(points_3d, extrinsics, intrinsics, width, height, bbox, grid=15):
     extrinsics = np.linalg.inv(extrinsics)
     
     R = extrinsics[:3, :3]
@@ -98,18 +97,18 @@ def project_points_bbox(points_3d, extrinsics, intrinsics, width, height, bbox, 
     image_points = image_points.T
 
     
-    depth_buffer = np.full((height//grid, width//grid), -np.inf)  # Use np.inf to signify initially infinitely far away
-    best_points = np.zeros((height//grid, width//grid, 3))  # To store the best 3D point corresponding to each pixel
-    best_cam_points = np.zeros((height//grid, width//grid, 3))  # To store the best 3D point corresponding to each pixel
+    depth_buffer = np.full((height//grid, width//grid), -np.inf)
+    best_points = np.zeros((height//grid, width//grid, 3))
+    best_cam_points = np.zeros((height//grid, width//grid, 3))
     
-    full_bbox = bbox.copy()
+    # full_bbox = bbox.copy()
     # correct x-coordinate of bbox:
     bbox[0], bbox[2] = width - bbox[2], width - bbox[0]
     bbox = bbox // grid  
     
     for point, img_pt, cam_pt in zip(points_3d, image_points, points_cam):
         x, y = int(img_pt[0]//grid), int(img_pt[1]//grid)
-        # TODO: < vs- <= ???
+        # TODO: < vs. <= ?
         if int(bbox[0]) <= x < int(bbox[2]) and int(bbox[1]) <= y < bbox[3]:
             if cam_pt[2] > depth_buffer[y, x]:  # Since z is negative, a smaller value means closer
                 depth_buffer[y, x] = cam_pt[2]
@@ -123,55 +122,48 @@ def project_points_bbox(points_3d, extrinsics, intrinsics, width, height, bbox, 
     y_indices, x_indices = np.where(valid)
     valid_image_points = np.vstack((x_indices*grid, y_indices*grid)).T
 
-    ### Segment the plane in camera space
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(valid_cam_points)
-    pcd.paint_uniform_color([0,1,0])
-    eq, _ = pcd.segment_plane(distance_threshold=0.02, ransac_n=3, num_iterations=1000)
+    # ### Segment the plane in camera space
+    # pcd = o3d.geometry.PointCloud()
+    # pcd.points = o3d.utility.Vector3dVector(valid_cam_points)
+    # pcd.paint_uniform_color([0,1,0])
+    # eq, _ = pcd.segment_plane(distance_threshold=0.02, ransac_n=3, num_iterations=1000)
     
-    bbox_center = ((bbox[0]+bbox[2])//2, (bbox[1]+bbox[3])//2)
-    bbox_depth = depth_buffer[int(bbox_center[1]), int(bbox_center[0])]
+    # bbox_center = ((bbox[0]+bbox[2])//2, (bbox[1]+bbox[3])//2)
+    # bbox_depth = depth_buffer[int(bbox_center[1]), int(bbox_center[0])]
     
-    bbox_2d_pixels = np.array([[width-full_bbox[0], full_bbox[1]], [width-full_bbox[0], full_bbox[3]], [width-full_bbox[2], full_bbox[3]], [width-full_bbox[2], full_bbox[1]]])
-    bbox_2d_center = np.array([(2*width-full_bbox[0]-full_bbox[2])//2, (full_bbox[1]+full_bbox[3])//2, 1])
+    # bbox_2d_pixels = np.array([[width-full_bbox[0], full_bbox[1]], [width-full_bbox[0], full_bbox[3]], [width-full_bbox[2], full_bbox[3]], [width-full_bbox[2], full_bbox[1]]])
+    # bbox_2d_center = np.array([(2*width-full_bbox[0]-full_bbox[2])//2, (full_bbox[1]+full_bbox[3])//2, 1])
     
-    pixels_bbox = np.hstack((bbox_2d_pixels, np.ones((bbox_2d_pixels.shape[0], 1))))
+    # pixels_bbox = np.hstack((bbox_2d_pixels, np.ones((bbox_2d_pixels.shape[0], 1))))
     
-    unproject_bbox = (np.linalg.inv(intrinsics) @ pixels_bbox.T).T * bbox_depth
-    center_bbox = (np.linalg.inv(intrinsics) @ bbox_2d_center.T).T * bbox_depth
+    # unproject_bbox = (np.linalg.inv(intrinsics) @ pixels_bbox.T).T * bbox_depth
+    # center_bbox = (np.linalg.inv(intrinsics) @ bbox_2d_center.T).T * bbox_depth
     
-    normal_dst = np.asarray(eq[:3])
-    R = compute_rotation_matrix(normal_dst)
+    # normal_dst = np.asarray(eq[:3])
+    # R = compute_rotation_matrix(normal_dst)
 
-    unproject_bbox -= center_bbox
-    transformed_bbox = (R @ unproject_bbox.T).T
-    transformed_bbox += center_bbox
+    # unproject_bbox -= center_bbox
+    # transformed_bbox = (R @ unproject_bbox.T).T
+    # transformed_bbox += center_bbox
 
-    bbox_2d_pixels_transformed = intrinsics @ transformed_bbox.T
+    # bbox_2d_pixels_transformed = intrinsics @ transformed_bbox.T
 
-    bbox_2d_pixels_transformed = bbox_2d_pixels_transformed[:2, :] / bbox_2d_pixels_transformed[2, :]
-    bbox_2d_pixels_transformed = bbox_2d_pixels_transformed.T
-    print(bbox_2d_pixels_transformed)
-    # TODO: next steps with the transformed 2d pixels??
+    # bbox_2d_pixels_transformed = bbox_2d_pixels_transformed[:2, :] / bbox_2d_pixels_transformed[2, :]
+    # bbox_2d_pixels_transformed = bbox_2d_pixels_transformed.T
+    # # TODO: next steps with the transformed 2d pixels??
     
     return valid_image_points, valid_points_3d
 
-def detections_to_bboxes(pcd_path, detections):
-    pcd_original = o3d.io.read_point_cloud(pcd_path)
-    points = np.asarray(pcd_original.points)
-
+def detections_to_bboxes(points, detections):
     bboxes_3d = []
-    for file, category, confidence, bbox in detections:
-        # TODO: what are the detecitons constructed of?
-        print(file, category, confidence, bbox)
+    for file, _, confidence, bbox in detections:
         intrinsics, extrinsics = parse_json(file + ".json")
         image = cv2.imread(file + ".jpg")
         width, height = image.shape[1], image.shape[0]
 
-        # TODO: category 2 is drawer door, but there also exists regular door (0) and regfrigerator door (3)
-        if category == "cabinet door" and confidence > 0.8:
+        if confidence > 0.8:
             bbox = np.array([bbox[0], bbox[1], bbox[2], bbox[3]])
-            _, points_3d = project_points_bbox(points, extrinsics, intrinsics, width, height, bbox, grid=15)
+            _, points_3d = project_points_bbox(points, extrinsics, intrinsics, width, height, bbox,)
             pcd_bbox = o3d.geometry.PointCloud()
             pcd_bbox.points = o3d.utility.Vector3dVector(points_3d)
             _, inliers = pcd_bbox.segment_plane(distance_threshold=0.02, ransac_n=3, num_iterations=1000)

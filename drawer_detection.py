@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os.path
-import time
-import glob
 from logging import Logger
 from typing import Optional
 
@@ -29,12 +27,9 @@ CATEGORIES = {"0": "door", "1": "handle", "2": "cabinet door", "3": "refrigerato
 def generate_distinct_colors(n: int) -> list[tuple[float, float, float]]:
     colors = []
     for i in range(n):
-        # Divide the hue space into equal parts
         hue = i / n
-        # Fixed saturation and lightness for high contrast and brightness
         saturation = 0.7
         lightness = 0.5
-        # Convert HSL color to RGB
         r, g, b = colorsys.hls_to_rgb(hue, lightness, saturation)
         colors.append((r, g, b))
 
@@ -90,7 +85,7 @@ def predict_yolodrawer(
     if len(contents) == 0:
         if vis_block:
             draw_boxes(image, [], image_name + "_detections.png")
-        return []
+        return [], 0
 
     classes = contents["classes"]
     confidences = contents["confidences"]
@@ -99,11 +94,11 @@ def predict_yolodrawer(
     detections = []
     for cls, conf, bbox in zip(classes, confidences, bboxes):
         name = CATEGORIES[str(int(cls))]
-        det = Detection(image_name, name, conf, BBox(*bbox))
-        detections.append(det)
+        if name != "handle":
+            det = Detection(image_name, name, conf, BBox(*bbox))
+            detections.append(det)
 
     if vis_block:
         draw_boxes(image, detections, image_name + "_detections.png")
-
-    # TODO: only do drawer detection, not handles
-    return detections
+    
+    return detections, len(detections)
