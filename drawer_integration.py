@@ -246,7 +246,7 @@ def register_light_switches(dir_path, vis_block=False, transform=False):
             pickle.dump(detections, f)
 
     pcd_original = o3d.io.read_point_cloud(
-        os.path.join(dir_path, '/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-01a/pcd.ply'))
+        os.path.join(dir_path, '/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-05a/pcd.ply'))
     points = np.asarray(pcd_original.points)
 
 
@@ -328,10 +328,10 @@ def register_light_switches(dir_path, vis_block=False, transform=False):
 
     # test
     # transform the points and plane normal to the ground frame
-    # T_IG = parse_txt("/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-01a/icp_tform_ground.txt")
-    # pts = np.array([i[0].center for i in bboxes_3d]).T
-    # pts = np.vstack((pts, np.ones(pts.shape[1])))
-    # pts_IG = np.dot(T_IG, pts)
+    T_IG = parse_txt("/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-05a/icp_tform_ground.txt")
+    pts = np.array([i[0].center for i in bboxes_3d]).T
+    pts = np.vstack((pts, np.ones(pts.shape[1])))
+    pts_IG = np.dot(T_IG, pts)
     # normals = np.array([i[1] for i in bboxes_3d]).T
     # normals_IG = np.dot(T_IG[:3, :3], normals)
 
@@ -379,6 +379,6 @@ def mean_shift_clustering(detections):
     return refined_detections
 
 if __name__ == "__main__":
-    _ = register_drawers("/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-01a", vis_block=True)
-    # _ = register_light_switches("/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-01a", vis_block=True)
+    # _ = register_drawers("/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-01a", vis_block=True)
+    _ = register_light_switches("/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-05a", vis_block=True)
     # _ = register_light_switches_aligned(dir_path="/home/cvg-robotics/tim_ws/spot-compose-tim/data/", pcd_name= "24-08-01a")
