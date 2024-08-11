@@ -166,7 +166,7 @@ def detections_to_bboxes(points, detections):
             _, points_3d = project_points_bbox(points, extrinsics, intrinsics, width, height, bbox,)
             pcd_bbox = o3d.geometry.PointCloud()
             pcd_bbox.points = o3d.utility.Vector3dVector(points_3d)
-            _, inliers = pcd_bbox.segment_plane(distance_threshold=0.02, ransac_n=3, num_iterations=1000)
+            _, inliers = pcd_bbox.segment_plane(distance_threshold=0.01, ransac_n=3, num_iterations=1000)
             pcd_bbox = pcd_bbox.select_by_index(inliers) 
             bbox_3d = pcd_bbox.get_minimal_oriented_bounding_box()
             bboxes_3d += [(bbox_3d, confidence)]

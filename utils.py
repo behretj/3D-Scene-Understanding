@@ -6,8 +6,8 @@ import imageio
 from moviepy.editor import VideoFileClip, clips_array
 import json
 
-def get_all_images(scan_dir):
-    vrs_files = glob.glob(os.path.join(scan_dir, '*.vrs'))
+def get_all_images(scan_dir, name):
+    vrs_files = glob.glob(os.path.join(scan_dir + name, '*.vrs'))
     assert vrs_files is not None, "No vrs files found in directory"
     for vrs_file in vrs_files:
         provider = data_provider.create_vrs_data_provider(vrs_file)
@@ -22,7 +22,7 @@ def get_all_images(scan_dir):
         w, h = calib.get_image_size()
         pinhole = calibration.get_linear_camera_calibration(w, h, calib.get_focal_lengths()[0])
 
-        image_dir = os.path.join(scan_dir, vrs_file[:-4] + "_images")
+        image_dir = os.path.join(scan_dir, os.path.basename(vrs_file)[:-4] + "_images")
         os.makedirs(image_dir, exist_ok=True)
 
         for i in range(provider.get_num_data(stream_id)):

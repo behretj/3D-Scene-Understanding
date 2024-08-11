@@ -69,15 +69,16 @@ def register_drawers(dir_path):
             detections += [predict_yolodrawer(image, image_name[:-4], vis_block=False)]
         with open(os.path.join(dir_path, 'detections.pkl'), 'wb') as f:
             pickle.dump(detections, f)
-    
+        
     clusters = cluster_images(detections)
+
+    # optimal_images = mean_shift_clustering(detections)
     
     optimal_images = select_optimal_images(clusters)
     
     detections = [det for subdets in [detections[opt][0] for opt in optimal_images] for det in subdets]
     
-    # TODO: choose a different standard name for the pcd file
-    pcd_original = o3d.io.read_point_cloud(os.path.join(dir_path, 'mesh_labelled_mask3d_dataset_1_y_up.ply'))
+    pcd_original = o3d.io.read_point_cloud(os.path.join(dir_path, 'mesh_labelled.ply'))
     bboxes_3d = detections_to_bboxes(np.asarray(pcd_original.points), detections)
 
     all_bbox_indices = [(np.array(bbox.get_point_indices_within_bounding_box(pcd_original.points)), conf) for bbox, conf in bboxes_3d]
@@ -119,21 +120,24 @@ def dbscan_clustering(detections):
 def mean_shift_clustering(detections):
     # features are only the number of detections per image
     features = np.array([np.array([i, n]) for i, (_, n) in enumerate(detections)])
+    counts = np.array([n for (_, n) in detections])
 
     mean_shift = MeanShift()
     mean_shift.fit(features)
     labels = mean_shift.labels_
 
-    cluster_counts = np.bincount(labels)
-    best_cluster = np.argmax(cluster_counts)
-    selected_indices = np.where(labels == best_cluster)[0]
-
-
-    refined_detections = [detections[i][0] for i in selected_indices]
-
-    # print(f"Selected {len(refined_detections)} images from cluster with the most detections.")
-
-    return refined_detections
+    image_indices = []
+    for i in range(max(labels), -1, -1):
+        indices = np.where(labels == i)[0]
+        max_val = np.max(counts[indices])
+        max_indexes = indices[np.where(counts[indices] > (max_val - (max_val // 4)))[0]]
+        if max_indexes.size > 1:
+            image_indices.extend(max_indexes.tolist())
+        else:
+            max_index = indices[np.where(counts[indices] == max_val)[0]]
+            image_indices.extend(max_index.tolist())
+            
+    return image_indices
 
 if __name__ == "__main__":
     _ = register_drawers("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Dataset/iPad-Scan-1")
