@@ -176,29 +176,6 @@ def register_drawers(dir_path, vis_block=False):
         with open(os.path.join(dir_path, 'detections.pkl'), 'wb') as f:
             pickle.dump(detections, f)
 
-    pcd_original = o3d.io.read_point_cloud(
-        os.path.join(dir_path, '/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-01a/pcd.ply'))
-    points = np.asarray(pcd_original.points)
-
-    data_num, data_name, data_file, points_bb_3d_list = cluster_detections(detections, points)
-    num_clusters = len(np.unique(data_num[:, -1]))
-    detections = []
-    test_centroids_idx = []
-    for cluster in range(1, num_clusters+1):
-        idx = np.where(data_num[:, -1] == cluster)
-        idx_start = np.min(idx)
-        det_per_cluster = data_num[data_num[:, -1] == cluster]
-
-        optimal_detection_idx = np.argmax(det_per_cluster[:, 0]) + idx_start
-
-        file = data_file[optimal_detection_idx]
-        name = data_name[optimal_detection_idx]
-        bbox = BBox(xmin=data_num[optimal_detection_idx][1], ymin=data_num[optimal_detection_idx][2],
-                    xmax=data_num[optimal_detection_idx][3], ymax=data_num[optimal_detection_idx][4])
-        detections.append(Detection(file=file, name=name, conf=data_num[optimal_detection_idx][0], bbox=bbox))
-        test_centroids_idx.append(data_num[optimal_detection_idx][-2])
-
-
     bboxes_3d = detections_to_bboxes(np.asarray(pcd_original.points), detections)
 
     all_bbox_indices = [(np.array(bbox.get_point_indices_within_bounding_box(pcd_original.points)), conf) for bbox, conf in bboxes_3d]
@@ -362,21 +339,24 @@ def dbscan_clustering(detections):
 def mean_shift_clustering(detections):
     # features are only the number of detections per image
     features = np.array([np.array([i, n]) for i, (_, n) in enumerate(detections)])
+    counts = np.array([n for (_, n) in detections])
 
     mean_shift = MeanShift()
     mean_shift.fit(features)
     labels = mean_shift.labels_
 
-    cluster_counts = np.bincount(labels)
-    best_cluster = np.argmax(cluster_counts)
-    selected_indices = np.where(labels == best_cluster)[0]
-
-
-    refined_detections = [detections[i][0] for i in selected_indices]
-
-    # print(f"Selected {len(refined_detections)} images from cluster with the most detections.")
-
-    return refined_detections
+    image_indices = []
+    for i in range(max(labels), -1, -1):
+        indices = np.where(labels == i)[0]
+        max_val = np.max(counts[indices])
+        max_indexes = indices[np.where(counts[indices] > (max_val - (max_val // 4)))[0]]
+        if max_indexes.size > 1:
+            image_indices.extend(max_indexes.tolist())
+        else:
+            max_index = indices[np.where(counts[indices] == max_val)[0]]
+            image_indices.extend(max_index.tolist())
+            
+    return image_indices
 
 if __name__ == "__main__":
     # _ = register_drawers("/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-01a", vis_block=True)

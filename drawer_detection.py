@@ -3,6 +3,7 @@ from __future__ import annotations
 import os.path
 from logging import Logger
 from typing import Optional
+import shutil
 
 import numpy as np
 
@@ -43,7 +44,7 @@ def draw_boxes(image: np.ndarray, detections: list[Detection], output_path: str)
     names_dict = {name: i for i, name in enumerate(names)}
     colors = generate_distinct_colors(len(names_dict))
 
-    for name, conf, (xmin, ymin, xmax, ymax) in detections:
+    for _, name, conf, (xmin, ymin, xmax, ymax) in detections:
         w, h = xmax - xmin, ymax - ymin
         color = colors[names_dict[name]]
         ax.add_patch(
@@ -69,15 +70,16 @@ def predict_yolodrawer(
     address_details = {'ip': "127.0.0.1", 'port': 5004, 'route': "yolodrawer/predict"}
     address = f"http://{address_details['ip']}:{address_details['port']}/{address_details['route']}"
     
-    os.makedirs("data/tmp", exist_ok=True)
+    os.makedirs("tmp", exist_ok=True)
 
-    save_data = [(image_name +".npy", np.save, image)]
-    image_path, *_ = save_files(save_data, "data/tmp")
+    image_prefix = os.path.basename(image_name)
+    save_data = [(f"{os.path.splitext(image_prefix)[0]}.npy", np.save, image)]
+    image_path, *_ = save_files(save_data, "tmp")
 
     paths_dict = {"image": image_path}
     if logger:
         logger.info(f"Sending request to {address}!")
-    contents = send_request(address, paths_dict, {}, timeout, "data/tmp")
+    contents = send_request(address, paths_dict, {}, timeout, "tmp")
     if logger:
         logger.info("Received response!")
 
@@ -100,5 +102,7 @@ def predict_yolodrawer(
 
     if vis_block:
         draw_boxes(image, detections, image_name + "_detections.png")
+    
+    shutil.rmtree("tmp")
     
     return detections, len(detections)
