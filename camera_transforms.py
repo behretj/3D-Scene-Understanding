@@ -293,7 +293,7 @@ def spot_to_aria_coords(points, aria_transform):
 
 def icp_alignment(source_folder, target_folder, T_init=np.eye(4)):
     """Aligns the source pointcloud to the target pointcloud using ICP."""
-    source_pcd = o3d.io.read_point_cloud(source_folder + "/mesh_labelled.ply")
+    source_pcd = o3d.io.read_point_cloud(source_folder + "/mesh_labeled.ply")
     target_pcd = o3d.io.read_point_cloud(target_folder + "/aria_pointcloud.ply")
 
     # source_pcd.estimate_normals()
@@ -305,4 +305,4 @@ def icp_alignment(source_folder, target_folder, T_init=np.eye(4)):
         criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=4000))
     
     source_pcd.transform(reg_p2l.transformation)
-    o3d.io.write_point_cloud(target_folder + "/mesh_labelled.ply", source_pcd)
+    o3d.io.write_point_cloud(target_folder + "/mesh_labeled.ply", source_pcd)

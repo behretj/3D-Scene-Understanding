@@ -12,6 +12,7 @@ from projectaria_tools.core import data_provider
 from projectaria_tools.core.mps.utils import get_nearest_wrist_and_palm_pose, get_nearest_pose
 import imageio, datetime, time
 from tqdm import tqdm
+import random
 from drawer_integration import register_drawers
 
 class ObjectNode:
@@ -256,14 +257,19 @@ class SceneGraph:
             pcd, depth=12)
         return mesh
     
-    def build(self, scan_dir, data_dir):
-        if os.path.exists(os.path.join(scan_dir, 'predictions_drawers.txt')):
-            label_path = os.path.join(scan_dir, 'predictions_drawers.txt')
-        else:
-            label_path = os.path.join(scan_dir, 'predictions.txt')
+    def build(self, scan_dir):
+        lines = []
         
-        with open(label_path, 'r') as file:
-            lines = file.readlines()
+        with open(os.path.join(scan_dir, 'predictions.txt'), 'r') as file:
+            lines += file.readlines()
+        
+        if os.path.exists(os.path.join(scan_dir, 'predictions_drawers.txt')):
+            with open(os.path.join(scan_dir, 'predictions_drawers.txt'), 'r') as file:
+                lines += file.readlines()
+        if os.path.exists(os.path.join(scan_dir, 'predictions_light_switches.txt')):
+            with open(os.path.join(scan_dir, 'predictions_light_switches.txt'), 'r') as file:
+                lines += file.readlines()
+
         
         file_paths = []
         values = []
@@ -275,18 +281,21 @@ class SceneGraph:
             values.append(int(parts[1]))
             confidences.append(float(parts[2]))
         
-        base_dir = os.path.dirname(os.path.abspath(label_path))
-        first_pred_mask_path = os.path.join(base_dir, file_paths[0])
+        base_dir = os.path.dirname(os.path.abspath(os.path.join(scan_dir, 'predictions.txt')))
+        # first_pred_mask_path = os.path.join(base_dir, file_paths[0])
 
-        with open(first_pred_mask_path, 'r') as file:
-            num_lines = len(file.readlines())
+        # with open(first_pred_mask_path, 'r') as file:
+        #     num_lines = len(file.readlines())
 
-        mask3d_labels = np.zeros(num_lines, dtype=np.int64)
+        # mask3d_labels = np.zeros(num_lines, dtype=np.int64)
 
-        pcd = o3d.io.read_point_cloud(data_dir + "/mesh_labelled.ply")
+        pcd = o3d.io.read_point_cloud(scan_dir + "/mesh_labeled.ply")
 
         np_points = np.array(pcd.points)
         np_colors = np.array(pcd.colors)
+
+
+        mask3d_labels = np.zeros(np_points.shape[0], dtype=np.int64)
         
 
         for i, relative_path in enumerate(file_paths):
@@ -388,13 +397,9 @@ class SceneGraph:
                 [0.99607843, 0.38039216, 0], [1., 0.69019608, 0.], [0.29803922, 0.68627451, 0.31372549], [0., 0.6, 0.8],
                 [0.70196078, 0.53333333, 1.], [0.89803922, 0.22352941, 0.20784314], [1., 0.25098039, 0.50588235]])
 
-        index = 0
         for node in self.nodes.values():
             if node.movable:
-                node.color = colors[index]
-                index += 1
-            if index >= len(colors):
-                index = 0
+                node.color = colors[random.randint(0, len(colors)-1)]
     
     def label_correction(self):
         """ manual correction of the semantic labels for my end presentation. """

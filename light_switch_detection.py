@@ -49,8 +49,8 @@ def filter_detections_ultralytics(detections, filter_squaredness=True, filter_ar
 
 
 def predict_light_switches(image: np.ndarray, image_name: str, vis_block: bool = False):
-
-    model = YOLO('../spot-compose-tim/weights/train27/weights/best.pt')#12, 27
+    # TODO: make weight folder a generic place
+    model = YOLO('/home/tjark/Documents/growing_scene_graphs/SceneGraph-Drawer/weights/best.pt')#12, 27
     results_predict = model.predict(source=image, imgsz=1280, conf=0.15, iou=0.4, max_det=9, agnostic_nms=True,
                                     save=False)  # save plotted images 0.3
 

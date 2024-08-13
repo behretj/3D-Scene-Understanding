@@ -9,9 +9,8 @@ from drawer_detection import predict_yolodrawer
 from light_switch_detection import predict_light_switches
 import scipy.cluster.hierarchy as hcluster
 import json
-from projecting import project_points_bbox, project_point_center
+from projecting import project_points_bbox
 from collections import namedtuple
-import copy
 
 BBox = namedtuple("BBox", ["xmin", "ymin", "xmax", "ymax"])
 Detection = namedtuple("Detection", ["file", "name", "conf", "bbox"])
@@ -182,10 +181,14 @@ def register_drawers(dir_path):
     
     detections = [det for subdets in [detections[opt][0] for opt in optimal_images] for det in subdets]
     
-    pcd_original = o3d.io.read_point_cloud(os.path.join(dir_path, 'mesh_labelled.ply'))
+    pcd_original = o3d.io.read_point_cloud(os.path.join(dir_path, 'mesh_labeled.ply'))
     bboxes_3d = detections_to_bboxes(np.asarray(pcd_original.points), detections)
 
+    # mesh = o3d.io.read_triangle_mesh(os.path.join(dir_path, 'textured_output.obj'))
+    # bboxes_3d = detections_to_bboxes(np.asarray(mesh.vertices), detections)
+
     all_bbox_indices = [(np.array(bbox.get_point_indices_within_bounding_box(pcd_original.points)), conf) for bbox, conf in bboxes_3d]
+    # all_bbox_indices = [(np.array(bbox.get_point_indices_within_bounding_box(mesh.vertices)), conf) for bbox, conf in bboxes_3d]
 
     registered_indices = []
     for indcs, conf in all_bbox_indices:     
@@ -216,29 +219,8 @@ def register_light_switches(dir_path, vis_block=False, transform=False):
         with open(os.path.join(dir_path, 'detections_lightswitch.pkl'), 'wb') as f:
             pickle.dump(detections, f)
 
-    pcd_original = o3d.io.read_point_cloud(
-        os.path.join(dir_path, '/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-05a/pcd.ply'))
+    pcd_original = o3d.io.read_point_cloud(os.path.join(dir_path, 'mesh_labeled.ply'))
     points = np.asarray(pcd_original.points)
-
-
-    # test
-    # data_num, data_name, data_file, origins_world, rays_world = cluster_detections(detections, points)
-    #
-    # length = 1
-    # color = [1, 0, 0]
-    # rays = []
-    # for idx, data in enumerate(data_num):
-    #     points = [origins_world[idx], origins_world[idx] + rays_world[idx] * length]
-    #     lines = [[0, 1]]
-    #     colors = [color for _ in lines]
-    #     line_set = o3d.geometry.LineSet()
-    #     line_set.points = o3d.utility.Vector3dVector(points)
-    #     line_set.lines = o3d.utility.Vector2iVector(lines)
-    #     line_set.colors = o3d.utility.Vector3dVector(colors)
-    #     rays.append(line_set)
-    #
-    # o3d.visualization.draw_geometries([pcd_original] + rays)
-
 
     data_num, data_name, data_file, points_bb_3d_list = cluster_detections(detections, points)
     num_clusters = len(np.unique(data_num[:, -1]))
@@ -299,10 +281,10 @@ def register_light_switches(dir_path, vis_block=False, transform=False):
 
     # test
     # transform the points and plane normal to the ground frame
-    T_IG = parse_txt("/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-05a/icp_tform_ground.txt")
-    pts = np.array([i[0].center for i in bboxes_3d]).T
-    pts = np.vstack((pts, np.ones(pts.shape[1])))
-    pts_IG = np.dot(T_IG, pts)
+    # T_IG = parse_txt("/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-05a/icp_tform_ground.txt")
+    # pts = np.array([i[0].center for i in bboxes_3d]).T
+    # pts = np.vstack((pts, np.ones(pts.shape[1])))
+    # pts_IG = np.dot(T_IG, pts)
     # normals = np.array([i[1] for i in bboxes_3d]).T
     # normals_IG = np.dot(T_IG[:3, :3], normals)
 
