@@ -159,7 +159,7 @@ def select_optimal_images(clusters):
             optimal_images.append(max(cluster, key=lambda x: x[1])[0])
     return optimal_images
 
-def register_drawers(dir_path, vis_block=False):
+def register_drawers(dir_path):
     # stores tuples containing the detected box(es) and its/their confidence(s)
     detections = []
     if os.path.exists(os.path.join(dir_path, 'detections.pkl')):
@@ -170,18 +170,25 @@ def register_drawers(dir_path, vis_block=False):
             img_path = os.path.join(dir_path, image_name)
             image = cv2.imread(img_path)
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            a = 2
             detections += [predict_yolodrawer(image, image_name[:-4], vis_block=False)]
-            a = 2
         with open(os.path.join(dir_path, 'detections.pkl'), 'wb') as f:
             pickle.dump(detections, f)
+        
+    clusters = cluster_images(detections)
 
+    # optimal_images = mean_shift_clustering(detections)
+    
+    optimal_images = select_optimal_images(clusters)
+    
+    detections = [det for subdets in [detections[opt][0] for opt in optimal_images] for det in subdets]
+    
+    pcd_original = o3d.io.read_point_cloud(os.path.join(dir_path, 'mesh_labelled.ply'))
     bboxes_3d = detections_to_bboxes(np.asarray(pcd_original.points), detections)
 
     all_bbox_indices = [(np.array(bbox.get_point_indices_within_bounding_box(pcd_original.points)), conf) for bbox, conf in bboxes_3d]
 
     registered_indices = []
-    for indcs, conf in all_bbox_indices:
+    for indcs, conf in all_bbox_indices:     
         for idx, (reg_indcs, confidence) in enumerate(registered_indices):
             iou = compute_iou(reg_indcs, indcs)
             if iou > 0.1:  # Check if the overlap is greater than 10%
@@ -190,20 +197,7 @@ def register_drawers(dir_path, vis_block=False):
                 break
         else:
             registered_indices.append((indcs, conf))
-
-    if vis_block:
-        all_colors = np.asarray(pcd_original.colors)
-        for (ind, conf) in all_bbox_indices:
-            all_colors[ind] = np.random.rand(3)
-        pcd_original.colors = o3d.utility.Vector3dVector(all_colors)
-
-        all_colors = np.asarray(pcd_original.colors)
-        for index in test_centroids_idx:
-            all_colors[int(index)] = [1, 0, 0]
-        pcd_original.colors = o3d.utility.Vector3dVector(all_colors)
-
-        o3d.visualization.draw_geometries([pcd_original])
-
+    
     return [indcs for (indcs, _) in sorted(registered_indices, key=lambda x: x[1])]
 
 
