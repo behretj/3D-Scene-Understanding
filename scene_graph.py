@@ -23,31 +23,31 @@ class ObjectNode:
         self.color = color
         self.movable = movable
         self.confidence = confidence
+        self.visible = True
         self.update_hull_tree()
     
     def update_hull_tree(self):
         self.hull_tree = KDTree(self.points[ConvexHull(self.points).vertices])
     
-    def transform(self, *args):
+    def transform(self, transformation):
         """ Transform the points of the node using a translation, rotation, or homogeneous transformation matrix."""
-        for arg in args:
-            if isinstance(arg, np.ndarray):
-                if arg.shape == (3,):
-                    self.centroid += arg
-                    self.points += arg
-                    self.update_hull_tree()
-                elif arg.shape == (3, 3):
-                    self.points = np.dot(arg, self.points.T).T
-                    self.centroid = np.dot(arg, self.centroid)
-                    self.update_hull_tree()
-                elif arg.shape == (4, 4):
-                    self.points = np.dot(arg, np.vstack((self.points.T, np.ones(self.points.shape[0])))).T[:, :3]
-                    self.centroid = np.dot(arg, np.append(self.centroid, 1))[:3]
-                    self.update_hull_tree()
-                else:
-                    raise ValueError("Invalid argument shape. Expected (3,) for translation, (3,3) for rotation, or (4,4) for homogeneous transformation.")
+        if isinstance(transformation, np.ndarray):
+            if transformation.shape == (3,):
+                self.centroid += transformation
+                self.points += transformation
+                self.update_hull_tree()
+            elif transformation.shape == (3, 3):
+                self.points = np.dot(transformation, self.points.T).T
+                self.centroid = np.dot(transformation, self.centroid)
+                self.update_hull_tree()
+            elif transformation.shape == (4, 4):
+                self.points = np.dot(transformation, np.vstack((self.points.T, np.ones(self.points.shape[0])))).T[:, :3]
+                self.centroid = np.dot(transformation, np.append(self.centroid, 1))[:3]
+                self.update_hull_tree()
             else:
-                raise TypeError("Invalid argument type. Expected numpy.ndarray.")
+                raise ValueError("Invalid argument shape. Expected (3,) for translation, (3,3) for rotation, or (4,4) for homogeneous transformation.")
+        else:
+            raise TypeError("Invalid argument type. Expected numpy.ndarray.")
 
 
 class DrawerNode(ObjectNode):
@@ -57,6 +57,7 @@ class DrawerNode(ObjectNode):
         pcd.points = o3d.utility.Vector3dVector(points)
         self.equation, _ = pcd.segment_plane(distance_threshold=0.02, ransac_n=3, num_iterations=1000)
         self.box = None
+        self.contains = []
     
     def sign_check(self, point):
         return np.dot(self.equation[:3], point) + self.equation[3] > 0
@@ -95,40 +96,52 @@ class DrawerNode(ObjectNode):
 
         return intersection_point
     
-    def transform(self, *args):
-        # TODO: haven't checked if this is working correctly
-        for arg in args:
-            if isinstance(arg, np.ndarray):
-                if arg.shape == (3,):
-                    normal = self.equation[:3]
-                    normal /= np.linalg.norm(normal)
-                    translation = np.dot(arg, normal) * normal
-                    self.centroid += translation
-                    self.points += translation
-                    self.box.translate(translation)
-                    self.update_hull_tree()
-                elif arg.shape == (4, 4):
-                    translation = arg[:3, 3]
-                    normal = self.equation[:3]
-                    normal /= np.linalg.norm(normal)
-                    translation = np.dot(translation, normal) * normal
-                    self.points += translation
-                    self.centroid += translation
-                    self.box.translate(translation)
-                    self.update_hull_tree()
-                else:
-                    raise ValueError("Invalid argument shape. Expected (3,) for translation or (4,4) for homogeneous transformation.")
-            else:
-                raise TypeError("Invalid argument type. Expected numpy.ndarray.")
+    def transform(self, transformation):
+        super().transform(transformation)
+        if isinstance(transformation, np.ndarray):
+            if transformation.shape == (3,):
+                self.box.translate(transformation)
+            elif transformation.shape == (4, 4):
+                translation = transformation[:3, 3]
+                rotation = transformation[:3, :3]
+                self.box = self.box.rotate(rotation, center=np.array([0, 0, 0]))
+                self.box.translate(translation)
+        for node in self.contains:
+            node.transform(transformation)
+        
+    # def transform(self, *args):
+    #     # TODO: haven't checked if this is working correctly
+    #     for arg in args:
+    #         if isinstance(arg, np.ndarray):
+    #             if arg.shape == (3,):
+    #                 normal = self.equation[:3]
+    #                 normal /= np.linalg.norm(normal)
+    #                 translation = np.dot(arg, normal) * normal
+    #                 self.centroid += translation
+    #                 self.points += translation
+    #                 self.box.translate(translation)
+    #                 self.update_hull_tree()
+    #             elif arg.shape == (4, 4):
+    #                 translation = arg[:3, 3]
+    #                 normal = self.equation[:3]
+    #                 normal /= np.linalg.norm(normal)
+    #                 translation = np.dot(translation, normal) * normal
+    #                 self.points += translation
+    #                 self.centroid += translation
+    #                 self.box.translate(translation)
+    #                 self.update_hull_tree()
+    #             else:
+    #                 raise ValueError("Invalid argument shape. Expected (3,) for translation or (4,4) for homogeneous transformation.")
+    #         else:
+    #             raise TypeError("Invalid argument type. Expected numpy.ndarray.")
 
         
 
 class SceneGraph:
-    def __init__(self, label_mapping = dict(), min_confidence = 0.0,  k=2, unmovable=[]):
+    def __init__(self, label_mapping = dict(), min_confidence = 0.0,  k=2, unmovable=[], pose=None):
         self.index = 0
         self.nodes = dict()
         self.labels = dict()
-        # TODO: find better names for these two attributes, from, to, or something similar
         self.outgoing = dict()
         self.ingoing = dict()
         self.tree = None
@@ -137,6 +150,15 @@ class SceneGraph:
         self.label_mapping = label_mapping
         self.min_confidence = min_confidence
         self.unmovable = unmovable
+        self.pose = pose
+    
+    def change_coordinate_system(self, transformation):
+        if self.pose is not None:
+            trans_inv = np.linalg.inv(self.pose)
+            transformation = np.dot(transformation, trans_inv)
+        for node in self.nodes.values():
+            node.transform(transformation)
+        self.tree = KDTree(np.array([self.nodes[index].centroid for index in self.ids]))
 
     def add_node(self, color, sem_label, points, confidence=None):
         if self.label_mapping.get(sem_label, "ID not found") in self.unmovable:
@@ -192,9 +214,9 @@ class SceneGraph:
         tmp = self.outgoing.get(node.object_id, None)
         if min_index is not None and tmp != min_index:
             # TODO: extend and test this for drawers
-            # if isinstance(self.nodes[min_index], DrawerNode):
-            #     index = self.nodes[min_index].box.get_point_indices_within_bounding_box(o3d.utility.Vector3dVector([node.centroid]))
-            #     print(index)                    
+            if isinstance(self.nodes[min_index], DrawerNode) and self.nodes[min_index].box is not None:
+                index = self.nodes[min_index].box.get_point_indices_within_bounding_box(o3d.utility.Vector3dVector([node.centroid]))
+                print(index)                    
             # the node is not connected to tmp anymore
             if tmp is not None:
                 self.ingoing[tmp].remove(node.object_id)
@@ -486,11 +508,6 @@ class SceneGraph:
             # Calculate the palm position in world coordinates
             palm_position_world = np.dot(T_world_device, np.append(palm_position_device, 1))[:3]
 
-            if index >= 275 and index <= 290:
-                print(index)
-                print(obj_dets)
-                print(hand_dets)
-                print(palm_position_world)
 
             object_positions.append(palm_position_world)
             if len(object_positions) > 2:
@@ -514,7 +531,6 @@ class SceneGraph:
                     
                     # No object is close by
                     if len(neighbor_indices)==0:
-                        # TODO: shouldn't this be True?
                         object_detected.append(False)
                     else:
                         # Query the convex hull of the nearest neighbors to determine the actual nearest object
@@ -552,6 +568,7 @@ class SceneGraph:
                 # print("Before cleaning", index)
                 momentum_index = index
                 current = average_speed.get(momentum_index, 1)
+                print("object was let go at frame", momentum_index)
                 while current > 0.015 and momentum_index > 0:
                     if tracking[momentum_index-1] is not None:
                         _, tmp_pose, tmp_position, tmp_offset = tracking[momentum_index-1]
@@ -560,7 +577,7 @@ class SceneGraph:
                     current = average_speed.get(momentum_index, 1)
                 hand_object = None
                 min_distance = 0.25
-                print("object was let go at frame", momentum_index)
+                print("object was corrected to frame", momentum_index)
             
             if hand_object is None:
                 tracking += [(None, T_world_device, palm_position_world, None)]

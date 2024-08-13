@@ -1,4 +1,5 @@
 import open3d as o3d
+import open3d.visualization.rendering as rendering
 import numpy as np
 import json, cv2
 import matplotlib.pyplot as plt
@@ -163,7 +164,10 @@ def detections_to_bboxes(points, detections):
 
         if confidence > 0.8:
             bbox = np.array([bbox[0], bbox[1], bbox[2], bbox[3]])
-            _, points_3d = project_points_bbox(points, extrinsics, intrinsics, width, height, bbox,)
+            _, points_3d = project_points_bbox(points, extrinsics, intrinsics, width, height, bbox)
+            # TODO: where should I put this sanity check?
+            if points_3d.shape[0] < 15:
+                continue
             pcd_bbox = o3d.geometry.PointCloud()
             pcd_bbox.points = o3d.utility.Vector3dVector(points_3d)
             _, inliers = pcd_bbox.segment_plane(distance_threshold=0.01, ransac_n=3, num_iterations=1000)
@@ -173,3 +177,99 @@ def detections_to_bboxes(points, detections):
 
        
     return bboxes_3d
+
+
+def project_mesh_to_image(intrinsics, extrinsics, width, height, mesh):
+    # Create a renderer with a set image width and height
+    def get_look_at_parameters_ipad(extrinsics):
+        """ transfer the extrinsics matrix to compatible parameters for the Open3D rendering camera"""
+        R = extrinsics[:3, :3]
+        t = extrinsics[:3, 3]
+        
+        eye = t
+        
+        camera_direction = np.array([0, 0, -1])
+        center = R @ camera_direction + t
+        
+        camera_up = np.array([0, 1, 0])
+        up = R @ camera_up
+        
+        return center, eye, up
+    
+    def get_look_at_parameters(extrinsics):
+        """ transfer the extrinsics matrix to compatible parameters for the Open3D rendering camera"""
+        R = extrinsics[:3, :3]
+        t = extrinsics[:3, 3]
+        
+        eye = t
+        
+        camera_direction = np.array([0, 0, 1])
+        center = R @ camera_direction + t
+        
+        camera_up = np.array([0, 1, 0])
+        up = R @ camera_up
+        
+        return center, eye, up
+
+    render = rendering.OffscreenRenderer(width, height)
+
+    # setup camera intrinsic values
+    # pinhole = o3d.camera.PinholeCameraIntrinsic(width, height, intrinsics)
+        
+    # Pick a background colour of the rendered image, I set it as black (default is light gray)
+    render.scene.set_background([0.0, 0.0, 0.0, 1.0])  # RGBA
+
+    # define further mesh properties, shape, vertices etc  (omitted here)  
+    mesh.paint_uniform_color([1.0, 0.0, 0.0]) # set Red color for mesh 
+
+    # Define a simple unlit Material.
+    # (The base color does not replace the mesh's own colors.)
+    mtl = o3d.visualization.rendering.MaterialRecord()
+    mtl.base_color = [1.0, 1.0, 1.0, 1.0]  # RGBA
+    mtl.shader = "defaultUnlit"
+
+    # add mesh to the scene
+    render.scene.add_geometry("MyMeshModel", mesh, mtl)
+
+    # render the scene with respect to the camera
+    render.scene.camera.set_projection(intrinsics, 0.1, 5.0, width, height)
+    center, eye, up = get_look_at_parameters_ipad(extrinsics)
+    render.scene.camera.look_at(center, eye, up)
+    img_o3d = render.render_to_image()
+
+    o3d.io.write_image("output_ipad.png", img_o3d, 9)
+
+
+if __name__ == "__main__":
+    mask = np.loadtxt("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Drawer/D-Lab-Scan/pred_mask/004.txt")
+
+    width, height = 1920, 1440
+    intrinsics, extrinsics = parse_json("SceneGraph-Drawer/D-Lab-Scan/frame_00247.json")
+    mesh = o3d.io.read_triangle_mesh("SceneGraph-Drawer/D-Lab-Scan/textured_output.obj")
+    pcd = o3d.io.read_point_cloud("SceneGraph-Drawer/D-Lab-Scan/mesh_labelled.ply")
+    print(mask.shape)
+    print(np.asarray(mesh.vertices).shape)
+    inverted_mask = np.ones(mask.shape) - mask
+    mesh.remove_vertices_by_mask(inverted_mask.astype(bool))
+    # o3d.visualization.draw_geometries([mesh])
+    project_mesh_to_image(intrinsics, extrinsics, width, height, mesh)
+
+    # width, height = 1408, 1408
+    # intrinsics = np.array([
+    #             [611.428, 0, 703.5],
+    #             [0, 611.428, 703.5],
+    #             [0, 0, 1]
+    #         ])
+    # T_device_camera = np.array([
+    #             [0.99205683, -0.05140061, 0.11480955, -0.00404916],
+    #             [0.11182453, 0.77834746, -0.61779488, -0.01218969],
+    #             [-0.05760668, 0.62572615, 0.77791276, -0.0051337],
+    #             [0, 0, 0, 1]
+    #         ])
+    # T_world_device = np.array([[-0.15276821,  0.24750261,  0.95676765, -0.386779  ],
+    #    [ 0.1672074 ,  0.96064713, -0.22180798,  0.266011  ],
+    #    [-0.97401415,  0.12609343, -0.18814061,  0.13133   ],
+    #    [ 0.        ,  0.        ,  0.        ,  1.        ]])
+    # extrinsics = np.dot(T_world_device, T_device_camera)
+    # mesh = o3d.io.read_point_cloud("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Drawer/cow_top_left/mesh_labelled.ply")
+    # project_mesh_to_image(intrinsics, extrinsics, width, height, mesh)

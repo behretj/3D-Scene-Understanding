@@ -18,7 +18,7 @@ def preprocess_scan(scan_dir, drawer_detection=False):
     points = np.asarray(mesh.vertices)
 
     # pcd = o3d.io.read_point_cloud(scan_dir + "/mesh_labelled.ply")
-    # points2 = np.asarray(pcd.points)
+    # points = np.asarray(pcd.points)
 
     if drawer_detection and not os.path.exists(scan_dir + "/predictions_drawers.txt"):
         indices_drawers = register_drawers(scan_dir)
