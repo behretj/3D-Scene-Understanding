@@ -16,7 +16,7 @@ import random
 from drawer_integration import register_drawers
 
 class ObjectNode:
-    def __init__(self, object_id, color, sem_label, points, confidence=None, movable=True):
+    def __init__(self, object_id, color, sem_label, points, mask, confidence=None, movable=True):
         self.object_id = object_id
         self.centroid = np.mean(points, axis=0)
         self.points = points
@@ -25,6 +25,7 @@ class ObjectNode:
         self.movable = movable
         self.confidence = confidence
         self.visible = True
+        self.mask = mask
         self.update_hull_tree()
     
     def update_hull_tree(self):
@@ -52,8 +53,8 @@ class ObjectNode:
 
 
 class DrawerNode(ObjectNode):
-    def __init__(self, object_id, color, sem_label, points, confidence=1.0, movable=True):
-        super().__init__(object_id, color, sem_label, points, confidence, movable)
+    def __init__(self, object_id, color, sem_label, points, mask, confidence=1.0, movable=True):
+        super().__init__(object_id, color, sem_label, points, mask, confidence, movable)
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         self.equation, _ = pcd.segment_plane(distance_threshold=0.02, ransac_n=3, num_iterations=1000)
@@ -136,7 +137,18 @@ class DrawerNode(ObjectNode):
     #         else:
     #             raise TypeError("Invalid argument type. Expected numpy.ndarray.")
 
-        
+class LightSwitchNode(ObjectNode):
+    def __init__(self, object_id, color, sem_label, points, mask, confidence=1.0, movable=True):
+        super().__init__(object_id, color, sem_label, points, mask, confidence, movable)
+        self.lamp = None
+    
+    def transform(self, _):
+        # light switch can't be moved
+        pass
+
+    def add_lamp(self, lamp_id):
+        # TODO: should we check if this is really a lamp? (would be easy)
+        self.lamp = lamp_id
 
 class SceneGraph:
     def __init__(self, label_mapping = dict(), min_confidence = 0.0,  k=2, unmovable=[], pose=None):
@@ -152,6 +164,7 @@ class SceneGraph:
         self.min_confidence = min_confidence
         self.unmovable = unmovable
         self.pose = pose
+        self.mesh = None
     
     def change_coordinate_system(self, transformation):
         if self.pose is not None:
@@ -159,17 +172,21 @@ class SceneGraph:
             transformation = np.dot(transformation, trans_inv)
         for node in self.nodes.values():
             node.transform(transformation)
+        if self.mesh is not None:
+            self.mesh.transform(transformation)
         self.tree = KDTree(np.array([self.nodes[index].centroid for index in self.ids]))
 
-    def add_node(self, color, sem_label, points, confidence=None):
+    def add_node(self, color, sem_label, points, confidence, mask):
         if self.label_mapping.get(sem_label, "ID not found") in self.unmovable:
             # mark objects as unmovable if a list was given
             # TODO: could in the future either be a complete list or LLM api request for open vocabulary
-            self.nodes[self.index] = ObjectNode(self.index, np.array([0.5, 0.5, 0.5]), sem_label, points, confidence, movable=False)
-        elif sem_label ==25:
-            self.nodes[self.index] = DrawerNode(self.index, color, sem_label, points, confidence)
+            self.nodes[self.index] = ObjectNode(self.index, np.array([0.5, 0.5, 0.5]), sem_label, points, confidence, mask, movable=False)
+        elif sem_label == 25:
+            self.nodes[self.index] = DrawerNode(self.index, color, sem_label, points, confidence, mask)
+        elif sem_label == 232:
+            self.nodes[self.index] = LightSwitchNode(self.index, color, sem_label, points, confidence, mask)
         else:
-            self.nodes[self.index] = ObjectNode(self.index, color, sem_label, points, confidence)
+            self.nodes[self.index] = ObjectNode(self.index, color, sem_label, points, confidence, mask)
         self.labels.setdefault(sem_label, []).append(self.index)
         self.ids.append(self.index)
         self.index += 1
@@ -188,7 +205,7 @@ class SceneGraph:
         if isinstance(node, DrawerNode):
             # iterate through all added shelfs in the scene (TODO: how to handle this in the future),
             # this restricts drawers to be added to shelf only
-            labels = [item for sublist in [self.labels.get(l, []) for l in [7, 8, 18]] for item in sublist]
+            labels = [item for sublist in [self.labels.get(l, []) for l in [7, 8, 18, 44]] for item in sublist]
             for idx in labels:
                 other = self.nodes[idx]
                 if other.object_id != node.object_id:
@@ -247,26 +264,17 @@ class SceneGraph:
         """ Saves the scene graph to a pickle file. """
         with open(file_path, 'wb') as f:
             pickle.dump(self, f)
-
-    def create_mesh(self, id):
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(self.nodes[id].points)
-        pcd.paint_uniform_color(self.nodes[id].color)
-        pcd.estimate_normals()
-        mesh, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-            pcd, depth=12)
-        return mesh
     
-    def build(self, scan_dir):
+    def build(self, scan_dir, drawers = True, light_switches = True):
         lines = []
         
         with open(os.path.join(scan_dir, 'predictions.txt'), 'r') as file:
             lines += file.readlines()
         
-        if os.path.exists(os.path.join(scan_dir, 'predictions_drawers.txt')):
+        if drawers and os.path.exists(os.path.join(scan_dir, 'predictions_drawers.txt')):
             with open(os.path.join(scan_dir, 'predictions_drawers.txt'), 'r') as file:
                 lines += file.readlines()
-        if os.path.exists(os.path.join(scan_dir, 'predictions_light_switches.txt')):
+        if light_switches and os.path.exists(os.path.join(scan_dir, 'predictions_light_switches.txt')):
             with open(os.path.join(scan_dir, 'predictions_light_switches.txt'), 'r') as file:
                 lines += file.readlines()
 
@@ -282,12 +290,10 @@ class SceneGraph:
             confidences.append(float(parts[2]))
         
         base_dir = os.path.dirname(os.path.abspath(os.path.join(scan_dir, 'predictions.txt')))
-        # first_pred_mask_path = os.path.join(base_dir, file_paths[0])
 
-        # with open(first_pred_mask_path, 'r') as file:
-        #     num_lines = len(file.readlines())
-
-        # mask3d_labels = np.zeros(num_lines, dtype=np.int64)
+        # TODO: textured_output vs export vs export_refined?
+        # TODO: only add the mesh where the mask3d label is 1?
+        self.mesh = o3d.io.read_triangle_mesh(scan_dir + "/export_refined.obj")
 
         pcd = o3d.io.read_point_cloud(scan_dir + "/mesh_labeled.ply")
 
@@ -310,6 +316,7 @@ class SceneGraph:
             else:
                 if index[np.argmax(counts)] == 0:
                     mask3d_labels[np.logical_and(labels == 1 , mask3d_labels == 0)] = values[i]
+                # TODO: rethink this because single points could get multiple labels
                 elif np.max(counts) < 10000 and np.max(counts)/np.sum(counts) > 0.75:
                     mask3d_labels[labels==1] = values[i]
         
@@ -320,7 +327,7 @@ class SceneGraph:
             node_points = np_points[np.logical_and(labels == 1 , mask3d_labels == values[i])]
             colors = np_colors[np.logical_and(labels == 1 , mask3d_labels == values[i])]
             if confidences[i] > self.min_confidence and node_points.shape[0] > 0:
-                self.add_node(colors[0], values[i], node_points, confidences[i])
+                self.add_node(colors[0], values[i], node_points, confidences[i], labels)
         
         self.init_graph()
         self.tree = KDTree(np.array([self.nodes[index].centroid for index in self.ids]))
@@ -328,9 +335,12 @@ class SceneGraph:
     def get_distance(self, point):
         _, idx = self.tree.query(point)
         return np.linalg.norm(point - self.nodes[self.ids[idx]].centroid)
+    
+    def query(self, point):
+        _, idx = self.tree.query(point)
+        return self.ids[idx]
         
     def remove_node(self, remove_index):
-        # TODO: we are not removing the self.labels here
         self.nodes.pop(remove_index, None)
         self.ids.remove(remove_index)
         deleted = self.outgoing.pop(remove_index, None)  
@@ -343,12 +353,29 @@ class SceneGraph:
         self.tree = KDTree(np.array([self.nodes[index].centroid for index in self.ids]))
 
     def remove_category(self, category):
-        # TODO: can replace label_to_remove by iterating through the self.labels dictionary
-        labels_to_remove = [label for label, cat in self.label_mapping.items() if cat == category]
-        for label in labels_to_remove:
-            for index in self.labels.get(label, []):
-                self.remove_node(index)
-            self.labels.pop(label, None)
+        label_to_remove = next((label for label, cat in self.label_mapping.items() if cat == category), None)
+        for index in self.labels.get(label_to_remove, []):
+            self.remove_node(index)
+        self.labels.pop(label_to_remove, None)
+
+    def query_object(self):
+        # TODO: is this working?
+        pcd = o3d.geometry.PointCloud()
+        points = np.array(self.mesh.vertices)
+        pcd.points = o3d.utility.Vector3dVector(points)
+        print("")
+        print("1) Please pick at least three correspondences using [shift + left click]")
+        print("   Press [shift + right click] to undo point picking")
+        print("2) After picking points, press 'Q' to close the window")
+        vis = o3d.visualization.VisualizerWithEditing()
+        vis.create_window()
+        vis.add_geometry(pcd)
+        vis.run()
+        vis.destroy_window()        
+        print("")
+        picked_point = vis.get_picked_points()[0]
+
+        return self.ids[self.tree.query(picked_point)[1]]
 
     
     def transform(self, idx, *args):
@@ -619,18 +646,25 @@ class SceneGraph:
                 initial_left, initial_right = None, None
                 continue            
             
+            # TODO: left_images = []
             # there is a detection for the left hand
             if left_id is not None:
                 left_correction = np.dot(pose[:3,:3], left_offset)
                 pose[:3, 3] = left_pos + left_correction
                 # object was not moved in previous iteration
-                if initial_left is None:           
+                if initial_left is None:
+                    # TODO: left_images += [current image]
+                    # TODO: get_mask for left_id in current image        
                     inv = np.linalg.inv(pose)
                     initial_left = inv
                 else:
+                    # TODO: stack images 
+                    # TODO: left_images += [current image]
                     self.transform(left_id, np.dot(pose, initial_left))
                     initial_left = np.linalg.inv(pose)
             else:
+                # TODO: tracking finsihed
+                # TODO: do pose estimation with images and mask 
                 initial_left = None
             
             # there is a detection for the right hand and the same object hasn't been moved with the left hand
@@ -874,6 +908,13 @@ class SceneGraph:
             pcd_points = node.points + scale * node.centroid
             if isinstance(node, DrawerNode) and node.box is not None:
                 geometries.append((node.box, "bbox_" + str(node.object_id), line_mat))
+            if isinstance(node, LightSwitchNode) and node.lamp is not None:
+                line_set = o3d.geometry.LineSet(
+                    points=o3d.utility.Vector3dVector([node.centroid + scale * node.centroid, self.nodes[node.lamp].centroid + scale * self.nodes[node.lamp].centroid]),
+                    lines=o3d.utility.Vector2iVector([[0, 1]])
+                )
+                line_set.paint_uniform_color([1, 0, 0])
+                geometries.append((line_set, "lamp_connection_" + str(node.object_id), line_mat))
             pcd.points = o3d.utility.Vector3dVector(pcd_points)
             pcd_color = np.array(node.color, dtype=np.float64)
             pcd.paint_uniform_color(pcd_color)

@@ -240,7 +240,7 @@ def register_light_switches(dir_path, vis_block=False, transform=False):
         detections.append(Detection(file=file, name=name, conf=data_num[optimal_detection_idx][0], bbox=bbox))
         test_centroids_idx.append(data_num[optimal_detection_idx][-2])
 
-    bboxes_3d = detections_to_bboxes(np.asarray(pcd_original.points), detections)
+    bboxes_3d = detections_to_bboxes(np.asarray(pcd_original.points), detections, threshold=0.7)
 
     all_bbox_indices = [(np.array(bbox.get_point_indices_within_bounding_box(pcd_original.points)), conf) for bbox, conf in bboxes_3d]
 
