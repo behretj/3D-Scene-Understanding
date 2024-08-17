@@ -9,9 +9,8 @@ from drawer_detection import predict_yolodrawer
 from light_switch_detection import predict_light_switches
 import scipy.cluster.hierarchy as hcluster
 import json
-from projecting import project_points_bbox, project_point_center
+from projecting import project_points_bbox
 from collections import namedtuple
-import copy
 
 BBox = namedtuple("BBox", ["xmin", "ymin", "xmax", "ymax"])
 Detection = namedtuple("Detection", ["file", "name", "conf", "bbox"])
@@ -159,7 +158,7 @@ def select_optimal_images(clusters):
             optimal_images.append(max(cluster, key=lambda x: x[1])[0])
     return optimal_images
 
-def register_drawers(dir_path, vis_block=False):
+def register_drawers(dir_path):
     # stores tuples containing the detected box(es) and its/their confidence(s)
     detections = []
     if os.path.exists(os.path.join(dir_path, 'detections.pkl')):
@@ -170,41 +169,29 @@ def register_drawers(dir_path, vis_block=False):
             img_path = os.path.join(dir_path, image_name)
             image = cv2.imread(img_path)
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            a = 2
             detections += [predict_yolodrawer(image, image_name[:-4], vis_block=False)]
-            a = 2
         with open(os.path.join(dir_path, 'detections.pkl'), 'wb') as f:
             pickle.dump(detections, f)
+        
+    clusters = cluster_images(detections)
 
-    pcd_original = o3d.io.read_point_cloud(
-        os.path.join(dir_path, '/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-01a/pcd.ply'))
-    points = np.asarray(pcd_original.points)
-
-    data_num, data_name, data_file, points_bb_3d_list = cluster_detections(detections, points)
-    num_clusters = len(np.unique(data_num[:, -1]))
-    detections = []
-    test_centroids_idx = []
-    for cluster in range(1, num_clusters+1):
-        idx = np.where(data_num[:, -1] == cluster)
-        idx_start = np.min(idx)
-        det_per_cluster = data_num[data_num[:, -1] == cluster]
-
-        optimal_detection_idx = np.argmax(det_per_cluster[:, 0]) + idx_start
-
-        file = data_file[optimal_detection_idx]
-        name = data_name[optimal_detection_idx]
-        bbox = BBox(xmin=data_num[optimal_detection_idx][1], ymin=data_num[optimal_detection_idx][2],
-                    xmax=data_num[optimal_detection_idx][3], ymax=data_num[optimal_detection_idx][4])
-        detections.append(Detection(file=file, name=name, conf=data_num[optimal_detection_idx][0], bbox=bbox))
-        test_centroids_idx.append(data_num[optimal_detection_idx][-2])
-
-
+    # optimal_images = mean_shift_clustering(detections)
+    
+    optimal_images = select_optimal_images(clusters)
+    
+    detections = [det for subdets in [detections[opt][0] for opt in optimal_images] for det in subdets]
+    
+    pcd_original = o3d.io.read_point_cloud(os.path.join(dir_path, 'mesh_labeled.ply'))
     bboxes_3d = detections_to_bboxes(np.asarray(pcd_original.points), detections)
 
+    # mesh = o3d.io.read_triangle_mesh(os.path.join(dir_path, 'textured_output.obj'))
+    # bboxes_3d = detections_to_bboxes(np.asarray(mesh.vertices), detections)
+
     all_bbox_indices = [(np.array(bbox.get_point_indices_within_bounding_box(pcd_original.points)), conf) for bbox, conf in bboxes_3d]
+    # all_bbox_indices = [(np.array(bbox.get_point_indices_within_bounding_box(mesh.vertices)), conf) for bbox, conf in bboxes_3d]
 
     registered_indices = []
-    for indcs, conf in all_bbox_indices:
+    for indcs, conf in all_bbox_indices:     
         for idx, (reg_indcs, confidence) in enumerate(registered_indices):
             iou = compute_iou(reg_indcs, indcs)
             if iou > 0.1:  # Check if the overlap is greater than 10%
@@ -213,20 +200,7 @@ def register_drawers(dir_path, vis_block=False):
                 break
         else:
             registered_indices.append((indcs, conf))
-
-    if vis_block:
-        all_colors = np.asarray(pcd_original.colors)
-        for (ind, conf) in all_bbox_indices:
-            all_colors[ind] = np.random.rand(3)
-        pcd_original.colors = o3d.utility.Vector3dVector(all_colors)
-
-        all_colors = np.asarray(pcd_original.colors)
-        for index in test_centroids_idx:
-            all_colors[int(index)] = [1, 0, 0]
-        pcd_original.colors = o3d.utility.Vector3dVector(all_colors)
-
-        o3d.visualization.draw_geometries([pcd_original])
-
+    
     return [indcs for (indcs, _) in sorted(registered_indices, key=lambda x: x[1])]
 
 
@@ -245,29 +219,8 @@ def register_light_switches(dir_path, vis_block=False, transform=False):
         with open(os.path.join(dir_path, 'detections_lightswitch.pkl'), 'wb') as f:
             pickle.dump(detections, f)
 
-    pcd_original = o3d.io.read_point_cloud(
-        os.path.join(dir_path, '/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-05a/pcd.ply'))
+    pcd_original = o3d.io.read_point_cloud(os.path.join(dir_path, 'mesh_labeled.ply'))
     points = np.asarray(pcd_original.points)
-
-
-    # test
-    # data_num, data_name, data_file, origins_world, rays_world = cluster_detections(detections, points)
-    #
-    # length = 1
-    # color = [1, 0, 0]
-    # rays = []
-    # for idx, data in enumerate(data_num):
-    #     points = [origins_world[idx], origins_world[idx] + rays_world[idx] * length]
-    #     lines = [[0, 1]]
-    #     colors = [color for _ in lines]
-    #     line_set = o3d.geometry.LineSet()
-    #     line_set.points = o3d.utility.Vector3dVector(points)
-    #     line_set.lines = o3d.utility.Vector2iVector(lines)
-    #     line_set.colors = o3d.utility.Vector3dVector(colors)
-    #     rays.append(line_set)
-    #
-    # o3d.visualization.draw_geometries([pcd_original] + rays)
-
 
     data_num, data_name, data_file, points_bb_3d_list = cluster_detections(detections, points)
     num_clusters = len(np.unique(data_num[:, -1]))
@@ -287,7 +240,7 @@ def register_light_switches(dir_path, vis_block=False, transform=False):
         detections.append(Detection(file=file, name=name, conf=data_num[optimal_detection_idx][0], bbox=bbox))
         test_centroids_idx.append(data_num[optimal_detection_idx][-2])
 
-    bboxes_3d = detections_to_bboxes(np.asarray(pcd_original.points), detections)
+    bboxes_3d = detections_to_bboxes(np.asarray(pcd_original.points), detections, threshold=0.7)
 
     all_bbox_indices = [(np.array(bbox.get_point_indices_within_bounding_box(pcd_original.points)), conf) for bbox, conf in bboxes_3d]
 
@@ -328,10 +281,10 @@ def register_light_switches(dir_path, vis_block=False, transform=False):
 
     # test
     # transform the points and plane normal to the ground frame
-    T_IG = parse_txt("/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-05a/icp_tform_ground.txt")
-    pts = np.array([i[0].center for i in bboxes_3d]).T
-    pts = np.vstack((pts, np.ones(pts.shape[1])))
-    pts_IG = np.dot(T_IG, pts)
+    # T_IG = parse_txt("/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-05a/icp_tform_ground.txt")
+    # pts = np.array([i[0].center for i in bboxes_3d]).T
+    # pts = np.vstack((pts, np.ones(pts.shape[1])))
+    # pts_IG = np.dot(T_IG, pts)
     # normals = np.array([i[1] for i in bboxes_3d]).T
     # normals_IG = np.dot(T_IG[:3, :3], normals)
 
@@ -362,21 +315,24 @@ def dbscan_clustering(detections):
 def mean_shift_clustering(detections):
     # features are only the number of detections per image
     features = np.array([np.array([i, n]) for i, (_, n) in enumerate(detections)])
+    counts = np.array([n for (_, n) in detections])
 
     mean_shift = MeanShift()
     mean_shift.fit(features)
     labels = mean_shift.labels_
 
-    cluster_counts = np.bincount(labels)
-    best_cluster = np.argmax(cluster_counts)
-    selected_indices = np.where(labels == best_cluster)[0]
-
-
-    refined_detections = [detections[i][0] for i in selected_indices]
-
-    # print(f"Selected {len(refined_detections)} images from cluster with the most detections.")
-
-    return refined_detections
+    image_indices = []
+    for i in range(max(labels), -1, -1):
+        indices = np.where(labels == i)[0]
+        max_val = np.max(counts[indices])
+        max_indexes = indices[np.where(counts[indices] > (max_val - (max_val // 4)))[0]]
+        if max_indexes.size > 1:
+            image_indices.extend(max_indexes.tolist())
+        else:
+            max_index = indices[np.where(counts[indices] == max_val)[0]]
+            image_indices.extend(max_index.tolist())
+            
+    return image_indices
 
 if __name__ == "__main__":
     # _ = register_drawers("/home/cvg-robotics/tim_ws/spot-compose-tim/data/prescans/24-08-01a", vis_block=True)

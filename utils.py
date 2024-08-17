@@ -6,8 +6,8 @@ import imageio
 from moviepy.editor import VideoFileClip, clips_array
 import json
 
-def get_all_images(scan_dir):
-    vrs_files = glob.glob(os.path.join(scan_dir, '*.vrs'))
+def get_all_images(scan_dir, name):
+    vrs_files = glob.glob(os.path.join(scan_dir + name, '*.vrs'))
     assert vrs_files is not None, "No vrs files found in directory"
     for vrs_file in vrs_files:
         provider = data_provider.create_vrs_data_provider(vrs_file)
@@ -22,7 +22,7 @@ def get_all_images(scan_dir):
         w, h = calib.get_image_size()
         pinhole = calibration.get_linear_camera_calibration(w, h, calib.get_focal_lengths()[0])
 
-        image_dir = os.path.join(scan_dir, vrs_file[:-4] + "_images")
+        image_dir = os.path.join(scan_dir, os.path.basename(vrs_file)[:-4] + "_images")
         os.makedirs(image_dir, exist_ok=True)
 
         for i in range(provider.get_num_data(stream_id)):
@@ -115,6 +115,23 @@ def filter_object(obj_dets, hand_dets):
     return img_obj_id
 
 
+def crop_image(image):
+        height, width = image.shape[:2]
+        
+        margin_x = int(width * (8.0 / 100) / 2)
+        margin_y = int(height * (8.0 / 100) / 2)
+
+        # Define the cropping rectangle
+        x_start = margin_x
+        x_end = width - margin_x
+        y_start = margin_y
+        y_end = height - margin_y
+
+        # Crop the image
+        cropped_image = image[y_start:y_end, x_start:x_end]
+
+        return cropped_image
+
 def create_video(image_dir, output_path="output.mp4", fps=30):
     images = []
     for filename in sorted(glob.glob(os.path.join(image_dir, '*.jpg'))):
@@ -125,6 +142,7 @@ def create_video(image_dir, output_path="output.mp4", fps=30):
         for i, image_file in enumerate(images):
             # Read each image
             image = imageio.imread(image_file)
+            image = crop_image(image)
             # Append the image to the video
             writer.append_data(image)
 
