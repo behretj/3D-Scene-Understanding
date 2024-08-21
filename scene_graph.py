@@ -141,15 +141,23 @@ class DrawerNode(ObjectNode):
 class LightSwitchNode(ObjectNode):
     def __init__(self, object_id, color, sem_label, points, mask, confidence=1.0, movable=True):
         super().__init__(object_id, color, sem_label, points, mask, confidence, movable)
-        self.lamp = None
-    
-    def transform(self, _):
-        # light switch can't be moved
-        pass
+        self.lamps = []
+        self.button_count = None
+        self.interaction = None
+        self.normal = None
 
     def add_lamp(self, lamp_id):
         # TODO: should we check if this is really a lamp? (would be easy)
-        self.lamp = lamp_id
+        self.lamps.append(lamp_id)
+
+    def set_button_count(self, count):
+        self.button_count = count
+
+    def set_interaction_type(self, interaction: str):
+        self.interaction = interaction
+
+    def set_normal(self, normal):
+        self.normal = normal
 
 class SceneGraph:
     def __init__(self, label_mapping = dict(), min_confidence = 0.0,  k=2, unmovable=[], pose=None):
@@ -169,8 +177,10 @@ class SceneGraph:
     
     def change_coordinate_system(self, transformation):
         if self.pose is not None:
-            trans_inv = np.linalg.inv(self.pose)
-            transformation = np.dot(transformation, trans_inv)
+            # TODO: Tim, I dont get it or this is not working correctly. If this is done, the transformation to spot system is not correct.
+            # trans_inv = np.linalg.inv(self.pose)
+            # transformation = np.dot(transformation, trans_inv)
+            transformation = transformation
         for node in self.nodes.values():
             node.transform(transformation)
         if self.mesh is not None:
@@ -920,13 +930,14 @@ class SceneGraph:
             pcd_points = node.points + scale * node.centroid
             if isinstance(node, DrawerNode) and node.box is not None:
                 geometries.append((node.box, "bbox_" + str(node.object_id), line_mat))
-            if isinstance(node, LightSwitchNode) and node.lamp is not None:
-                line_set = o3d.geometry.LineSet(
-                    points=o3d.utility.Vector3dVector([node.centroid + scale * node.centroid, self.nodes[node.lamp].centroid + scale * self.nodes[node.lamp].centroid]),
-                    lines=o3d.utility.Vector2iVector([[0, 1]])
-                )
-                line_set.paint_uniform_color([1, 0, 0])
-                geometries.append((line_set, "lamp_connection_" + str(node.object_id), line_mat))
+            if isinstance(node, LightSwitchNode) and len(node.lamps) > 0:
+                for lamp in node.lamps:
+                    line_set = o3d.geometry.LineSet(
+                        points=o3d.utility.Vector3dVector([node.centroid + scale * node.centroid, self.nodes[lamp].centroid + scale * self.nodes[lamp].centroid]),
+                        lines=o3d.utility.Vector2iVector([[0, 1]])
+                    )
+                    line_set.paint_uniform_color([1, 0, 0])
+                    geometries.append((line_set, "lamp_connection_" + str(node.object_id), line_mat))
             pcd.points = o3d.utility.Vector3dVector(pcd_points)
             pcd_color = np.array(node.color, dtype=np.float64)
             pcd.paint_uniform_color(pcd_color)
