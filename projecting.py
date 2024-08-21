@@ -1,8 +1,14 @@
 import open3d as o3d
 import open3d.visualization.rendering as rendering
 import numpy as np
-import json, cv2
+import json, cv2, os, glob, pickle
 import matplotlib.pyplot as plt
+import projectaria_tools.core.mps as mps
+from projectaria_tools.core import data_provider, calibration
+from PIL import Image
+from projectaria_tools.core.mps.utils import get_nearest_wrist_and_palm_pose, get_nearest_pose
+from utils import crop_image
+from scipy.spatial import cKDTree
 
 def parse_json(file_path):
     with open(file_path, 'r') as file:
@@ -155,14 +161,14 @@ def project_points_bbox(points_3d, extrinsics, intrinsics, width, height, bbox, 
     
     return valid_image_points, valid_points_3d
 
-def detections_to_bboxes(points, detections):
+def detections_to_bboxes(points, detections, threshold=0.7):
     bboxes_3d = []
     for file, _, confidence, bbox in detections:
         intrinsics, extrinsics = parse_json(file + ".json")
         image = cv2.imread(file + ".jpg")
         width, height = image.shape[1], image.shape[0]
 
-        if confidence > 0.8:
+        if confidence > threshold:
             bbox = np.array([bbox[0], bbox[1], bbox[2], bbox[3]])
             _, points_3d = project_points_bbox(points, extrinsics, intrinsics, width, height, bbox)
             # TODO: where should I put this sanity check?
@@ -179,97 +185,86 @@ def detections_to_bboxes(points, detections):
     return bboxes_3d
 
 
-def project_mesh_to_image(intrinsics, extrinsics, width, height, mesh):
-    # Create a renderer with a set image width and height
-    def get_look_at_parameters_ipad(extrinsics):
-        """ transfer the extrinsics matrix to compatible parameters for the Open3D rendering camera"""
-        R = extrinsics[:3, :3]
-        t = extrinsics[:3, 3]
-        
-        eye = t
-        
-        camera_direction = np.array([0, 0, -1])
-        center = R @ camera_direction + t
-        
-        camera_up = np.array([0, 1, 0])
-        up = R @ camera_up
-        
-        return center, eye, up
+def get_mask_points(scan_dir, img_id):
+    ### Load the necessary files
+    vrs_files = glob.glob(os.path.join(scan_dir, '*.vrs'))
+    assert vrs_files is not None, "No vrs files found in directory"
+    vrs_file = vrs_files[0]
+    filename = os.path.splitext(os.path.basename(vrs_file))[0]
+
+    provider = data_provider.create_vrs_data_provider(vrs_file)
+    assert provider is not None, "Cannot open file"
     
-    def get_look_at_parameters(extrinsics):
-        """ transfer the extrinsics matrix to compatible parameters for the Open3D rendering camera"""
-        R = extrinsics[:3, :3]
-        t = extrinsics[:3, 3]
-        
-        eye = t
-        
-        camera_direction = np.array([0, 0, 1])
-        center = R @ camera_direction + t
-        
-        camera_up = np.array([0, 1, 0])
-        up = R @ camera_up
-        
-        return center, eye, up
+    camera_label = "camera-rgb"
+    calib = provider.get_device_calibration().get_camera_calib(camera_label)
+    stream_id = provider.get_stream_id_from_label(camera_label)
+    w, h = calib.get_image_size()
 
-    render = rendering.OffscreenRenderer(width, height)
+    closed_loop_path = scan_dir + "/mps_" + filename + "_vrs/slam/closed_loop_trajectory.csv"
+    closed_loop_traj = mps.read_closed_loop_trajectory(closed_loop_path)
 
-    # setup camera intrinsic values
-    # pinhole = o3d.camera.PinholeCameraIntrinsic(width, height, intrinsics)
-        
-    # Pick a background colour of the rendered image, I set it as black (default is light gray)
-    render.scene.set_background([0.0, 0.0, 0.0, 1.0])  # RGBA
+    query_timestamp = provider.get_image_data_by_index(stream_id, img_id)[1].capture_timestamp_ns
 
-    # define further mesh properties, shape, vertices etc  (omitted here)  
-    mesh.paint_uniform_color([1.0, 0.0, 0.0]) # set Red color for mesh 
+    device_pose = get_nearest_pose(closed_loop_traj, query_timestamp)
 
-    # Define a simple unlit Material.
-    # (The base color does not replace the mesh's own colors.)
-    mtl = o3d.visualization.rendering.MaterialRecord()
-    mtl.base_color = [1.0, 1.0, 1.0, 1.0]  # RGBA
-    mtl.shader = "defaultUnlit"
+    T_world_device = device_pose.transform_world_device
 
-    # add mesh to the scene
-    render.scene.add_geometry("MyMeshModel", mesh, mtl)
+    T_device_rgb_camera = calib.get_transform_device_camera()
+    T_world_rgb_camera = T_world_device @ T_device_rgb_camera
 
-    # render the scene with respect to the camera
-    render.scene.camera.set_projection(intrinsics, 0.1, 5.0, width, height)
-    center, eye, up = get_look_at_parameters_ipad(extrinsics)
-    render.scene.camera.look_at(center, eye, up)
-    img_o3d = render.render_to_image()
+    extrinsics = T_world_rgb_camera.to_matrix()
 
-    o3d.io.write_image("output_ipad.png", img_o3d, 9)
+    mesh = o3d.io.read_triangle_mesh("SceneGraph-Drawer/D-Lab-Scan/textured_output.obj")
+    pose = np.load("SceneGraph-Drawer/clock_plant/icp_transformation.npy")
+    mesh.transform(pose)
+
+    # clock is mask 10
+    mask = np.loadtxt("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Drawer/D-Lab-Scan/pred_mask/010.txt")
+
+    points = np.asarray(mesh.vertices)
+    points = points[mask.astype(bool)]
+
+    pcd = o3d.io.read_point_cloud("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Drawer/clock_plant/aria_pointcloud.ply")
+
+    aria_points = np.asarray(pcd.points)
+
+    print(aria_points.shape, points.shape)
+
+    kdtree = cKDTree(aria_points)
+
+    _, indices = kdtree.query(points, k=1)
+
+    closest_points = aria_points[indices]
+
+    points_cam = np.dot(np.linalg.inv(extrinsics), np.hstack((closest_points, np.ones((closest_points.shape[0], 1)))).T)
+    points_cam = points_cam.T[:, :3]
+
+    image_data = provider.get_image_data_by_index(stream_id, img_id)
+    raw_image = image_data[0].to_numpy_array()
+    pinhole = calibration.get_linear_camera_calibration(w, h, calib.get_focal_lengths()[0])
+    undistorted_image = calibration.distort_by_calibration(raw_image, pinhole, calib)
+    aruco_image = cv2.cvtColor(raw_image, cv2.COLOR_RGB2BGR)
+
+    points_list = []
+    
+    for point in points_cam:
+        image_point = calib.project(point)
+        if image_point is None:
+            continue
+        image_point_int = np.round(image_point).astype(int)
+        x, y = image_point_int
+        points_list.append([0, x, y])
+        aruco_image = cv2.circle(aruco_image, (x, y), radius=2, color=(0, 0, 255), thickness=-1)  # Red color
+    
+    points_array = np.array(points_list)
+    points_array = np.unique(points_array, axis=0)
+    np.save("queries.npy", points_array)
+    
+    output_image_path = "mask_shelf.jpg"
+    aruco_image = cv2.rotate(aruco_image, cv2.ROTATE_90_CLOCKWISE)
+    cv2.imwrite(output_image_path, aruco_image)
+
 
 
 if __name__ == "__main__":
-    mask = np.loadtxt("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Drawer/D-Lab-Scan/pred_mask/004.txt")
-
-    width, height = 1920, 1440
-    intrinsics, extrinsics = parse_json("SceneGraph-Drawer/D-Lab-Scan/frame_00247.json")
-    mesh = o3d.io.read_triangle_mesh("SceneGraph-Drawer/D-Lab-Scan/textured_output.obj")
-    pcd = o3d.io.read_point_cloud("SceneGraph-Drawer/D-Lab-Scan/mesh_labelled.ply")
-    print(mask.shape)
-    print(np.asarray(mesh.vertices).shape)
-    inverted_mask = np.ones(mask.shape) - mask
-    mesh.remove_vertices_by_mask(inverted_mask.astype(bool))
-    # o3d.visualization.draw_geometries([mesh])
-    project_mesh_to_image(intrinsics, extrinsics, width, height, mesh)
-
-    # width, height = 1408, 1408
-    # intrinsics = np.array([
-    #             [611.428, 0, 703.5],
-    #             [0, 611.428, 703.5],
-    #             [0, 0, 1]
-    #         ])
-    # T_device_camera = np.array([
-    #             [0.99205683, -0.05140061, 0.11480955, -0.00404916],
-    #             [0.11182453, 0.77834746, -0.61779488, -0.01218969],
-    #             [-0.05760668, 0.62572615, 0.77791276, -0.0051337],
-    #             [0, 0, 0, 1]
-    #         ])
-    # T_world_device = np.array([[-0.15276821,  0.24750261,  0.95676765, -0.386779  ],
-    #    [ 0.1672074 ,  0.96064713, -0.22180798,  0.266011  ],
-    #    [-0.97401415,  0.12609343, -0.18814061,  0.13133   ],
-    #    [ 0.        ,  0.        ,  0.        ,  1.        ]])
-    # extrinsics = np.dot(T_world_device, T_device_camera)
-    # mesh = o3d.io.read_point_cloud("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Drawer/cow_top_left/mesh_labelled.ply")
-    # project_mesh_to_image(intrinsics, extrinsics, width, height, mesh)
+    get_mask_points("/home/tjark/Documents/growing_scene_graphs/SceneGraph-Drawer/clock_plant", 184)

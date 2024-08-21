@@ -305,4 +305,5 @@ def icp_alignment(source_folder, target_folder, T_init=np.eye(4)):
         criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=4000))
     
     source_pcd.transform(reg_p2l.transformation)
+    # np.save(target_folder + "/icp_transformation", np.array(reg_p2l.transformation))
     o3d.io.write_point_cloud(target_folder + "/mesh_labeled.ply", source_pcd)

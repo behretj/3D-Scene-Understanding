@@ -7,7 +7,7 @@ from moviepy.editor import VideoFileClip, clips_array
 import json
 
 def get_all_images(scan_dir, name):
-    vrs_files = glob.glob(os.path.join(scan_dir + name, '*.vrs'))
+    vrs_files = glob.glob(os.path.join(scan_dir, name, '*.vrs'))
     assert vrs_files is not None, "No vrs files found in directory"
     for vrs_file in vrs_files:
         provider = data_provider.create_vrs_data_provider(vrs_file)

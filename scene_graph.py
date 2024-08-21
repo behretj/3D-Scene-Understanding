@@ -26,6 +26,7 @@ class ObjectNode:
         self.confidence = confidence
         self.visible = True
         self.mask = mask
+        self.visible = True
         self.update_hull_tree()
     
     def update_hull_tree(self):
@@ -233,8 +234,11 @@ class SceneGraph:
         if min_index is not None and tmp != min_index:
             # TODO: extend and test this for drawers
             if isinstance(self.nodes[min_index], DrawerNode) and self.nodes[min_index].box is not None:
-                index = self.nodes[min_index].box.get_point_indices_within_bounding_box(o3d.utility.Vector3dVector([node.centroid]))
-                print(index)                    
+                inside = self.nodes[min_index].box.get_point_indices_within_bounding_box(o3d.utility.Vector3dVector([node.centroid, np.array([-0.75, -0.4, -0.6])]))
+                if len(inside):
+                    self.nodes[min_index].contains.append(node)
+                    node.visible = False
+                               
             # the node is not connected to tmp anymore
             if tmp is not None:
                 self.ingoing[tmp].remove(node.object_id)
@@ -265,7 +269,7 @@ class SceneGraph:
         with open(file_path, 'wb') as f:
             pickle.dump(self, f)
     
-    def build(self, scan_dir, drawers = True, light_switches = True):
+    def build(self, scan_dir, aria_dir=None, drawers = True, light_switches = True):
         lines = []
         
         with open(os.path.join(scan_dir, 'predictions.txt'), 'r') as file:
@@ -295,13 +299,17 @@ class SceneGraph:
         # TODO: only add the mesh where the mask3d label is 1?
         self.mesh = o3d.io.read_triangle_mesh(scan_dir + "/export_refined.obj")
 
-        pcd = o3d.io.read_point_cloud(scan_dir + "/mesh_labeled.ply")
+        if aria_dir is None:
+            pcd = o3d.io.read_point_cloud(scan_dir + "/mesh_labeled.ply")
+        else:
+            pcd = o3d.io.read_point_cloud(aria_dir + "/mesh_labeled.ply")
 
         np_points = np.array(pcd.points)
         np_colors = np.array(pcd.colors)
 
 
-        mask3d_labels = np.zeros(np_points.shape[0], dtype=np.int64)
+        # mask3d_labels = np.zeros((np_points.shape[0], 2), dtype=np.int64)
+        mask3d_labels = np.ones((np_points.shape[0], 2), dtype=np.int64) * -1
         
 
         for i, relative_path in enumerate(file_paths):
@@ -309,23 +317,27 @@ class SceneGraph:
                 continue
             file_path = os.path.join(base_dir, relative_path)
             labels = np.loadtxt(file_path, dtype=np.int64)
-            index, counts = np.unique(mask3d_labels[labels==1], return_counts=True)
+            index, counts = np.unique(mask3d_labels[labels == 1, 0], return_counts=True)
+            print(index, counts)
             if index.shape[0] == 1:
-                if index[0] == 0 or counts[0] < 10000:
-                    mask3d_labels[labels==1] = values[i]
+                if index[0] == -1 or (counts[0] < 10000 and counts[0] > 50):
+                    mask3d_labels[labels == 1, 0] = values[i]
+                    mask3d_labels[labels == 1, 1] = i
             else:
-                if index[np.argmax(counts)] == 0:
-                    mask3d_labels[np.logical_and(labels == 1 , mask3d_labels == 0)] = values[i]
-                # TODO: rethink this because single points could get multiple labels
-                elif np.max(counts) < 10000 and np.max(counts)/np.sum(counts) > 0.75:
-                    mask3d_labels[labels==1] = values[i]
+                if index[np.argmax(counts)] == -1:
+                    mask3d_labels[np.logical_and(labels == 1, mask3d_labels[:, 0] == -1), 0] = values[i]
+                    mask3d_labels[np.logical_and(labels == 1, mask3d_labels[:, 1] == -1), 1] = i
+                elif np.max(counts) < 10000 and np.max(counts) / np.sum(counts) > 0.75:
+                    mask3d_labels[labels == 1, 0] = values[i]
+                    mask3d_labels[labels == 1, 1] = i
         
         for i, relative_path in enumerate(file_paths):
             file_path = os.path.join(base_dir, relative_path)
             labels = np.loadtxt(file_path, dtype=np.int64)
             
-            node_points = np_points[np.logical_and(labels == 1 , mask3d_labels == values[i])]
-            colors = np_colors[np.logical_and(labels == 1 , mask3d_labels == values[i])]
+            node_points = np_points[np.logical_and.reduce((labels == 1, mask3d_labels[:, 0] == values[i], mask3d_labels[:, 1] == i))]
+            colors = np_colors[np.logical_and.reduce((labels == 1, mask3d_labels[:, 0] == values[i], mask3d_labels[:, 1] == i))]
+            
             if confidences[i] > self.min_confidence and node_points.shape[0] > 0:
                 self.add_node(colors[0], values[i], node_points, confidences[i], labels)
         
